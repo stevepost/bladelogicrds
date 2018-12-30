@@ -1,0 +1,70 @@
+{
+  "name" : "Cookbook2BlPkgScript",
+  "description" : "This script is used to create chef cookbook bundle and chef cookbook deploy job.Please DO NOT DELETE THIS.",
+  "scriptType" : "Execute the script once, passing the host list as a parameter to the script",
+  "allowRunWithNoTarget" : true,
+  "nshScriptParams" : [ {
+    "name" : "-c",
+    "description" : "Cookbook List",
+    "index" : 1,
+    "flag" : "c",
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "valueRequiredAtRuntime" : true,
+    "editable" : false
+  }, {
+    "name" : "-n",
+    "description" : "Node.json File",
+    "index" : 2,
+    "flag" : "n",
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "valueRequiredAtRuntime" : true,
+    "editable" : false
+  }, {
+    "name" : "-b",
+    "description" : "Databag List File",
+    "index" : 3,
+    "flag" : "b",
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "valueRequiredAtRuntime" : true,
+    "editable" : false
+  }, {
+    "name" : "-r",
+    "description" : "Role list file",
+    "index" : 4,
+    "flag" : "r",
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "valueRequiredAtRuntime" : true,
+    "editable" : false
+  }, {
+    "name" : "-e",
+    "description" : "Environment list file",
+    "index" : 5,
+    "flag" : "e",
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "valueRequiredAtRuntime" : true,
+    "editable" : false
+  }, {
+    "name" : "-d",
+    "description" : "Databag Name",
+    "index" : 6,
+    "flag" : "d",
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "valueRequiredAtRuntime" : true,
+    "editable" : false
+  }, {
+    "name" : "HostnameList",
+    "description" : "Hostname List",
+    "index" : 7,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "defaultValue" : "%h",
+    "valueRequiredAtRuntime" : true,
+    "editable" : false
+  } ]
+}
