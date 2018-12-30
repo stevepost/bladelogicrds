@@ -1,0 +1,97 @@
+{
+  "name" : "BSA Dashboard Script",
+  "description" : "BSA Dashboard Script",
+  "scriptType" : "Execute the script once, passing the host list as a parameter to the script",
+  "allowRunWithNoTarget" : true,
+  "nshScriptParams" : [ {
+    "name" : "BLUser",
+    "description" : "BLUser",
+    "index" : 1,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "defaultValue" : "BLAdmin",
+    "valueRequiredAtRuntime" : true,
+    "editable" : true
+  }, {
+    "name" : "BLRole",
+    "description" : "BLRole",
+    "index" : 2,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "defaultValue" : "BLAdmins",
+    "valueRequiredAtRuntime" : true,
+    "editable" : true
+  }, {
+    "name" : "BLPassword",
+    "description" : "BLPassword",
+    "index" : 3,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "defaultValue" : "UVAOABNEWMKZWWLPBLXOMZUMUPEKZKBAAPZZNXOLLWOVNQPWLWVLWXPNBEBWXAMU",
+    "valueRequiredAtRuntime" : true,
+    "editable" : true
+  }, {
+    "name" : "BLProfile",
+    "description" : "BLProfile",
+    "index" : 4,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "defaultValue" : "defaultProfile",
+    "valueRequiredAtRuntime" : true,
+    "editable" : true
+  }, {
+    "name" : "Retention",
+    "description" : "Number of reports to be retained on job server.",
+    "index" : 5,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "defaultValue" : "5",
+    "valueRequiredAtRuntime" : false,
+    "editable" : true
+  }, {
+    "name" : "SendEmailAlerts",
+    "description" : "Send Email Alerts (y/n) ?",
+    "index" : 6,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "defaultValue" : "n",
+    "valueRequiredAtRuntime" : false,
+    "editable" : true
+  }, {
+    "name" : "FromEmailId",
+    "description" : "Email id from which the email will be sent",
+    "index" : 7,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "defaultValue" : "NA",
+    "valueRequiredAtRuntime" : false,
+    "editable" : true
+  }, {
+    "name" : "ToEmailId",
+    "description" : "Email id to which the email will be sent",
+    "index" : 8,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "defaultValue" : "NA",
+    "valueRequiredAtRuntime" : false,
+    "editable" : true
+  }, {
+    "name" : "BdssaServer",
+    "description" : "BDSSA Server Host Name",
+    "index" : 9,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "valueRequiredAtRuntime" : false,
+    "editable" : true
+  }, {
+    "name" : "h",
+    "description" : "No host param",
+    "index" : 10,
+    "flag" : "h",
+    "parameterFlagRequired" : false,
+    "acceptValue" : false,
+    "defaultValue" : "%h",
+    "valueRequiredAtRuntime" : false,
+    "editable" : true
+  } ]
+}
