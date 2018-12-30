@@ -1,0 +1,91 @@
+{
+  "name" : "BSA Recommended Database Cleanup Script-20160518-112827",
+  "description" : "Database and File Server Cleanup Script",
+  "scriptType" : "Execute the script once, passing the host list as a parameter to the script",
+  "allowRunWithNoTarget" : true,
+  "nshScriptParams" : [ {
+    "name" : "ExecutionMode",
+    "description" : "Execution mode",
+    "index" : 1,
+    "flag" : "m",
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "defaultValue" : "TYPICAL",
+    "valueRequiredAtRuntime" : true,
+    "editable" : true
+  }, {
+    "name" : "ContinueOnError",
+    "description" : "Continue execution on error (true/false)",
+    "index" : 2,
+    "flag" : "c",
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "defaultValue" : "true",
+    "valueRequiredAtRuntime" : false,
+    "editable" : true
+  }, {
+    "name" : "MaxDuration",
+    "description" : "Maximum duration of operation in minutes",
+    "index" : 3,
+    "flag" : "d",
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "valueRequiredAtRuntime" : false,
+    "editable" : true
+  }, {
+    "name" : "DurationDistribution",
+    "description" : "Distribution of the duration across commands",
+    "index" : 4,
+    "flag" : "p",
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "valueRequiredAtRuntime" : false,
+    "editable" : true
+  }, {
+    "name" : "RetentionTime",
+    "description" : "Retention in days",
+    "index" : 5,
+    "flag" : "r",
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "valueRequiredAtRuntime" : false,
+    "editable" : true
+  }, {
+    "name" : "ObjectType",
+    "description" : "Type of object",
+    "index" : 6,
+    "flag" : "o",
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "valueRequiredAtRuntime" : false,
+    "editable" : true
+  }, {
+    "name" : "RoleName",
+    "description" : "Role to cleanup objects from",
+    "index" : 7,
+    "flag" : "R",
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "valueRequiredAtRuntime" : false,
+    "editable" : true
+  }, {
+    "name" : "TargetDevices",
+    "description" : "List of device targets",
+    "index" : 8,
+    "flag" : "t",
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "defaultValue" : "%h",
+    "valueRequiredAtRuntime" : false,
+    "editable" : true
+  }, {
+    "name" : "TargetSize",
+    "description" : "Target size in MB of the repeater repository",
+    "index" : 9,
+    "flag" : "s",
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "valueRequiredAtRuntime" : false,
+    "editable" : true
+  } ]
+}
