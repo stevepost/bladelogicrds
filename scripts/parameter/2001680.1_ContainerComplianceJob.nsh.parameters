@@ -1,0 +1,67 @@
+{
+  "name" : "Container Compliance Job",
+  "description" : "Container Compliance",
+  "scriptType" : "Execute the script once, passing the host list as a parameter to the script",
+  "allowRunWithNoTarget" : true,
+  "nshScriptParams" : [ {
+    "name" : "Targets",
+    "index" : 1,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "defaultValue" : "%h",
+    "valueRequiredAtRuntime" : true,
+    "editable" : false
+  }, {
+    "name" : "JOB_FOLDER",
+    "index" : 2,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "valueRequiredAtRuntime" : true,
+    "editable" : true
+  }, {
+    "name" : "JOB_NAME",
+    "index" : 3,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "valueRequiredAtRuntime" : true,
+    "editable" : true
+  }, {
+    "name" : "CUSTOM_SOFTWARE_FOLDER",
+    "index" : 4,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "valueRequiredAtRuntime" : true,
+    "editable" : true
+  }, {
+    "name" : "CUSTOM_SOFTWARE_NAME",
+    "index" : 5,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "valueRequiredAtRuntime" : true,
+    "editable" : true
+  }, {
+    "name" : "CONCURRENT_SCANS",
+    "description" : "Number of concurrent scans to perform",
+    "index" : 6,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "valueRequiredAtRuntime" : true,
+    "editable" : true
+  }, {
+    "name" : "SCAN_TYPE",
+    "description" : "IMAGE for image checks, CONTAINER for container checks and BOTH for checking both Images and containers",
+    "index" : 7,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "valueRequiredAtRuntime" : true,
+    "editable" : true
+  }, {
+    "name" : "TMP_LOCATION",
+    "description" : "Location to use to untar images for image scan",
+    "index" : 8,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "valueRequiredAtRuntime" : true,
+    "editable" : true
+  } ]
+}
