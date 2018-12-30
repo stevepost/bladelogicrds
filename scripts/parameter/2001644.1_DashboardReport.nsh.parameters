@@ -1,0 +1,17 @@
+{
+  "name" : "BSA Dashboard Report Script",
+  "description" : "BSA Dashboard Report Script",
+  "scriptType" : "Execute the script once, passing the host list as a parameter to the script",
+  "allowRunWithNoTarget" : true,
+  "nshScriptParams" : [ {
+    "name" : "h",
+    "description" : "No host param",
+    "index" : 1,
+    "flag" : "h",
+    "parameterFlagRequired" : false,
+    "acceptValue" : false,
+    "defaultValue" : "%h",
+    "valueRequiredAtRuntime" : false,
+    "editable" : true
+  } ]
+}
