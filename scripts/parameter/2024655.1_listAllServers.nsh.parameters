@@ -1,0 +1,6 @@
+{
+  "name" : "listAllServers.nsh",
+  "description" : "test",
+  "scriptType" : "Execute the script separately against each host (using 'runscript')",
+  "allowRunWithNoTarget" : false
+}
