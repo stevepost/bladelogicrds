@@ -1,0 +1,1999 @@
+#!/bin/sh
+#set -x
+#<name> disa-findFiles
+#<desc> Shared Script for Finding Files
+#<type> Sensor
+#<sci>  DISA Unix Script - findFiles
+#<owner> Copyright (C) 2008 BladeLogic, Inc.
+#######################################################################
+#<doc> NAME
+#<doc>         findFiles
+#<doc>
+#<doc> SYNTAX
+#<doc>          disa-findFiles <OS=osname> <FORCEFIND=<y/n>
+#<doc>		Ex. disa-findFiles OS=Solaris FORCEFIND=n
+#<doc>
+#<doc> DESCRIPTION
+#<doc> findFiles
+#<doc> If Force Find = n, results from the last 24 hours will be used
+#<doc>
+#<doc>
+
+
+i_SIGINT=2
+i_SIGTERM=15
+i_SIGKILL=9
+
+
+
+usage()
+{
+	echo "Usage:	$0 [ $str_CMD_LN_PM_FORCE_FIND ] [ $str_CMD_LN_PM_MAX_DISK_PERCENTAGE percentage ] [ $str_CMD_LN_PM_CACHE_HOURS hours ]"
+	echo "			[ $str_CMD_LN_PM_PRUNE directory-path ] [ $str_CMD_LN_PM_RSCD_DIRECTORY directory-path ]"
+	echo "			[ $str_CMD_LN_PM_SCAN_DIRECTORY directory-path ] [ $str_CMD_LN_PM_FIND_TIMEOUT timeout ]"
+	echo "			[ $str_CMD_LN_PM_MAX_PROCESS_COUNT max-proces-count ] [ $str_CMD_LN_EXCLUDE_USERS excluded-users ]"
+	echo "          [ $str_CMD_LN_PM_HELP ]"
+	echo
+	echo "		$str_CMD_LN_PM_FORCE_FIND: forces updating of cache, regardless of time since last updation."
+	echo "			The default is not to update cache unless $i_CATCHE_HOURS hours have elapsed since last updation of cache."
+	echo "		$str_CMD_LN_PM_MAX_DISK_PERCENTAGE percentage: prevents find files from using more than 'percentage'% of disk space."
+	echo "			The default value is $i_MAX_DISK_PERCENTAGE%."
+	echo "		$str_CMD_LN_PM_CACHE_HOURS hours: 'hours' is the number of hours for which find files will continue to use the existing cache."
+	echo "			The default value is $i_CATCHE_HOURS hours."
+	echo "		$str_CMD_LN_PM_PRUNE directory-path: 'directory-path' will not be searched as part of global seach for non compliant files."
+	echo "			For Aix and Solaris only a directory in the root level can be specified."
+	echo "			Providing this parameter multiple times will make each such 'directory-path'"
+	echo "			to be excluded from path used for find files search."
+	echo "		$str_CMD_LN_PM_RSCD_DIRECTORY directory-path: 'directory-path' species the location of RSCD directory."
+	echo "			This will be excluded from global search for non compliant files."
+	echo "		$str_CMD_LN_PM_SCAN_DIRECTORY directory-path: 'directory-path' will be used as starting"
+	echo "			point for global search for non compliant files instead of /."
+	echo "			Providing this parameter multiple times will make each such 'directory-path'"
+	echo "			to be included in path used for find files search."
+	echo "		$str_CMD_LN_PM_FIND_TIMEOUT timeout: Time out in minutes value for find files."
+	echo "			The default timeout is 0, which means find files will continue its execution"
+	echo "			as long as it has to."
+	echo "      $str_CMD_LN_PM_MAX_PROCESS_COUNT max-proces-count: Maximum number of parallel process that"
+	echo "          will be executing at any given time."
+	echo "      $str_CMD_LN_EXCLUDE_USERS excluded-users: Comma separated list of users to be excluded. Currently,"
+	echo "          this works only for specific rules."
+	echo "		$str_CMD_LN_PM_HELP: displays this help."
+	echo
+	echo
+}
+
+print_error_for_invalid_parameter_and_exit()
+{
+	echo "$1" 1>&2
+	echo
+	usage
+	exit 1
+}
+
+print_error_that_parameter_argument_has_to_be_integer_and_exit()
+{
+	print_error_for_invalid_parameter_and_exit "Invalid parameter sent to '$1' option. Parameter must be an integer."
+}
+
+is_integer()
+{
+	if [ -z "$1" -o `echo "$1" | egrep -c '[^0-9]'` -ne 0 ]
+	then
+		return 1
+	fi
+
+	return 0
+}
+
+capitalise_word()
+{
+	$AWK '{ for ( i=1; i <= NF; i++) { sub(".", substr(toupper($i),1,1), $i) }  print }'
+}
+
+parse_parameters()
+{
+	while [ $# -gt 0 ]
+	do
+		case "$1" in
+			$str_CMD_LN_PM_FORCE_FIND)
+				b_FORCE_FIND=1
+				;;
+			$str_CMD_LN_PM_MAX_DISK_PERCENTAGE)
+				if is_integer "$2"
+				then
+					i_MAX_DISK_PERCENTAGE="$2"
+				else
+					print_error_that_parameter_argument_has_to_be_integer_and_exit "$1"
+				fi
+				shift
+				;;
+			$str_CMD_LN_PM_CACHE_HOURS)
+				if is_integer "$2"
+				then
+					i_CATCHE_HOURS="$2"
+				else
+					print_error_that_parameter_argument_has_to_be_integer_and_exit "$1"
+				fi
+				shift
+				;;
+			$str_CMD_LN_PM_MAX_PROCESS_COUNT)
+				if is_integer "$2"
+				then
+					i_BACKGROUND_PROCESS_MAX_COUNT="$2"
+				else
+					print_error_that_parameter_argument_has_to_be_integer_and_exit "$1"
+				fi
+				shift
+				;;
+			$str_CMD_LN_EXCLUDE_USERS)
+				if [ -n "$2" ]
+				then
+					str_USERS_TO_BE_EXCLUDED="$2"
+				fi
+				shift
+				;;
+			$str_CMD_LN_PM_PRUNE|$str_CMD_LN_PM_RSCD_DIRECTORY)
+				if [ -n "$2" ]
+				then
+					str_PRUNED_DIRS="$2"
+				fi
+				
+				str_BEFORE="$IFS"
+				IFS=","
+				for str_DIR in $str_PRUNED_DIRS
+				do
+					if [ -n "$str_DIR" -a -d "$str_DIR" ]
+					then
+						i_DIRECTORIES_TO_BE_PRUNED_COUNT=`expr $i_DIRECTORIES_TO_BE_PRUNED_COUNT + 1`
+						eval str_DIRECTORY_TO_BE_PRUNED_$i_DIRECTORIES_TO_BE_PRUNED_COUNT="$str_DIR"
+					fi
+				done
+				IFS="$str_BEFORE"
+			    shift
+				;;
+			$str_CMD_LN_PM_SCAN_DIRECTORY)
+				if [ -n "$2" -a -d "$2" ]
+				then
+					i_DIRECTORIES_TO_BE_SCANNED_COUNT=`expr $i_DIRECTORIES_TO_BE_SCANNED_COUNT + 1`
+					eval str_DIRECTORY_TO_BE_SCANNED_$i_DIRECTORIES_TO_BE_SCANNED_COUNT="$2"
+				fi
+				shift
+				;;
+			$str_CMD_LN_PM_FIND_TIMEOUT)
+				if is_integer "$2"
+				then
+					i_FINDFILE_TIMEOUT="$2"
+				else
+					print_error_that_parameter_argument_has_to_be_integer_and_exit "$1"
+				fi
+				shift
+				;;
+			$str_CMD_LN_PM_HELP)
+				usage
+				exit 0
+				;;
+		esac
+		shift
+	done
+}
+
+append_pid_into_list_of_background_processes()
+{
+	if [ -n "$str_BACKGROUND_PROCESS_PIDS" ]
+	then
+		str_BACKGROUND_PROCESS_PIDS=`UNIX95=  ps -p $str_BACKGROUND_PROCESS_PIDS,$1 -o pid= | $str_TAIL | tr '\n' ','`
+		str_BACKGROUND_PROCESS_PIDS=`echo "$str_BACKGROUND_PROCESS_PIDS" |sed -e 's/,$//' -e 's/^,//' -e 's/ //g'`
+		if [ $i_BACKGROUND_PROCESS_MAX_COUNT -ne 0 ]
+		then
+			wait_for_find_processes_to_exit `expr $i_BACKGROUND_PROCESS_MAX_COUNT`
+		fi
+	else
+		str_BACKGROUND_PROCESS_PIDS="$1"
+	fi
+}
+
+register_for_merge ()
+{
+	str_TARGET="$1"
+	str_SOURCE="$2"
+	if [ -z "$str_TAGS_TO_BE_MERGED" ]
+	then
+		str_TAGS_TO_BE_MERGED="$str_TARGET:$str_SOURCE"
+	else
+		str_TAGS_TO_BE_MERGED="$str_TAGS_TO_BE_MERGED $str_TARGET:$str_SOURCE"
+	fi
+}
+
+initialise()
+{
+	str_CMD_LN_PM_FORCE_FIND='-forcefind'
+	str_CMD_LN_PM_MAX_DISK_PERCENTAGE='-maxdiskpercentage'
+	str_CMD_LN_PM_CACHE_HOURS='-cachehours'
+	str_CMD_LN_PM_PRUNE='-prune'
+	str_CMD_LN_PM_RSCD_DIRECTORY='-rscddirectory'
+	str_CMD_LN_PM_SCAN_DIRECTORY='-scandirectory'
+	str_CMD_LN_PM_FIND_TIMEOUT='-findtimeout'
+	str_CMD_LN_PM_MAX_PROCESS_COUNT='-maxprocesscount'
+	str_CMD_LN_EXCLUDE_USERS='-excludeusers'
+	str_CMD_LN_PM_HELP='-h|-help'
+	
+	i_FIND_FILE_PATH_INDEX=11
+	i_FIND_FILE_DEVICE_INDEX=12
+
+	OS_TYPE_LINUX="Linux"
+	OS_TYPE_AIX="AIX"
+	OS_TYPE_HPUX="HP-UX"
+	OS_TYPE_SUNOS="SunOS"
+
+	OS=`uname`
+
+	AWK=awk
+	str_OR_SEPARATOR=","
+	str_FINDOPT_PRUNE_REMOTE_FS='( ( -fstype nfs -o -fstype autofs ) -prune )' 
+	str_FINDOPT_UID='-user'
+	str_FINDOPT_GID='-group'
+	str_FIND_COMMAND='find'
+	str_FIND_FOLLOW_OPTION='-follow'
+	str_TAIL='tail -n +2'
+	PATH=/bin:/sbin:/usr/bin::/usr/sbin:/usr/local/sbin:/usr/local/bin:$PATH
+	case "$OS" in
+		$OS_TYPE_LINUX) 
+			i_FIND_FILE_DEVICE_INDEX=10
+			str_FINDOPT_UID='-uid'
+			str_FINDOPT_GID='-gid'
+			str_GETENT_PASSWD="getent passwd"
+			;;
+		$OS_TYPE_SUNOS)	
+			PATH="/usr/xpg4/bin:/usr/sfw/bin:$PATH"
+			AWK=nawk
+			str_OR_SEPARATOR='-o'
+			str_SOLARIS_ACL="-acl -a"
+			str_FINDOPT_PRUNE_REMOTE_FS="( $str_FINDOPT_PRUNE_REMOTE_FS -o ( ( -fstype ctfs -o -fstype objfs -o -fstype cachefs ) -prune ) )"
+			str_GETENT_PASSWD="getent passwd"
+			str_TAIL='tail +2'
+			;;
+		$OS_TYPE_HPUX)
+			str_OR_SEPARATOR='-o'
+			str_GETENT_PASSWD="cat /etc/passwd"
+			;;
+		$OS_TYPE_AIX)
+			str_OR_SEPARATOR='-o'
+			str_GETENT_PASSWD="cat /etc/passwd"
+			str_FINDOPT_PRUNE_REMOTE_FS='( -fstype nfs -prune )'
+#			str_FIND_COMMAND="find -L"
+#			str_FIND_FOLLOW_OPTION=""
+			;;
+	esac
+
+	LANG="POSIX" ; export LANG
+	LC_ALL="POSIX" ; export LC_ALL
+	str_STAGING_DIRECTORY=`dirname "$0"`
+
+	i_PID=$$
+	str_TIMESTAMP=`date +"%y%m%d%H%M%S"`
+	str_FIND_ERRORS_PATH="$str_STAGING_DIRECTORY/find_errors"
+	str_FIND_FILES_CACHE_PATH="$str_STAGING_DIRECTORY/find_files_cache"
+	str_FIND_FILES_CACHE_UNUSABLE_PATH="$str_STAGING_DIRECTORY/find_files_cache_unusable"
+	str_ALRM_SCRIPT_PATH="${str_STAGING_DIRECTORY}/find_alrm_script_${i_PID}_${str_TIMESTAMP}"
+	str_DISK_SPACE_CHECK_SCRIPT_PATH="${str_STAGING_DIRECTORY}/find_disk_space_check_script_${i_PID}_${str_TIMESTAMP}"
+
+	b_FORCE_FIND=0
+	i_MAX_DISK_PERCENTAGE=80
+	i_CATCHE_HOURS=24
+	i_DIRECTORIES_TO_BE_SCANNED_COUNT=0
+	i_DIRECTORIES_TO_BE_PRUNED_COUNT=0
+	i_DIRECTORIES_TO_BE_EXCLUDED_COUNT=0
+	i_FINDFILE_TIMEOUT=0
+	i_BACKGROUND_PROCESS_MAX_COUNT=30
+
+	str_USER_DIRECTORY_LIST_PATH="$str_STAGING_DIRECTORY/user_directories_list"
+	str_SCAN_DIRECTORY_LIST_PATH="$str_STAGING_DIRECTORY/scan_directories_list"
+
+	str_FINDOPT_TYPE_F='( -type f )'
+	str_FINDOPT_TYPE_D='( -type d )'
+
+	str_FINDOPT_PERM_OR='-perm -0400'
+	str_FINDOPT_PERM_OW='-perm -0200'
+	str_FINDOPT_PERM_OX='-perm -0100'
+	str_FINDOPT_PERM_GR='-perm -0040'
+	str_FINDOPT_PERM_GW='-perm -0020'
+	str_FINDOPT_PERM_GX='-perm -0010'
+	str_FINDOPT_PERM_WR='-perm -0004'
+	str_FINDOPT_PERM_WW='-perm -0002'
+	str_FINDOPT_PERM_WX='-perm -0001'
+	str_FINDOPT_PERM_SUID='-perm -4000'
+	str_FINDOPT_PERM_SGID='-perm -2000'
+	str_FINDOPT_PERM_STICKY='-perm -1000'
+	
+	str_FINDOPT_PERM_0444="( $str_FINDOPT_PERM_OW -o $str_FINDOPT_PERM_OX -o $str_FINDOPT_PERM_GW -o $str_FINDOPT_PERM_GX -o $str_FINDOPT_PERM_WW -o $str_FINDOPT_PERM_WX -o $str_FINDOPT_PERM_SUID -o $str_FINDOPT_PERM_SGID -o $str_FINDOPT_PERM_STICKY )"
+	str_FINDOPT_PERM_0600="( $str_FINDOPT_PERM_OX -o $str_FINDOPT_PERM_GR -o $str_FINDOPT_PERM_GW -o $str_FINDOPT_PERM_GX -o $str_FINDOPT_PERM_WR -o $str_FINDOPT_PERM_WW -o $str_FINDOPT_PERM_WX -o $str_FINDOPT_PERM_SUID -o $str_FINDOPT_PERM_SGID -o $str_FINDOPT_PERM_STICKY )"
+	str_FINDOPT_PERM_0640="( $str_FINDOPT_PERM_OX -o $str_FINDOPT_PERM_GW -o $str_FINDOPT_PERM_GX -o $str_FINDOPT_PERM_WR -o $str_FINDOPT_PERM_WW -o $str_FINDOPT_PERM_WX -o $str_FINDOPT_PERM_SUID -o $str_FINDOPT_PERM_SGID -o $str_FINDOPT_PERM_STICKY )"
+	str_FINDOPT_PERM_0644="( $str_FINDOPT_PERM_OX -o $str_FINDOPT_PERM_GW -o $str_FINDOPT_PERM_GX -o $str_FINDOPT_PERM_WW -o $str_FINDOPT_PERM_WX -o $str_FINDOPT_PERM_SUID -o $str_FINDOPT_PERM_SGID -o $str_FINDOPT_PERM_STICKY )"
+	str_FINDOPT_PERM_0660="( $str_FINDOPT_PERM_OX -o $str_FINDOPT_PERM_GX -o $str_FINDOPT_PERM_WR -o $str_FINDOPT_PERM_WW -o $str_FINDOPT_PERM_WX -o $str_FINDOPT_PERM_SUID -o $str_FINDOPT_PERM_SGID -o $str_FINDOPT_PERM_STICKY )"
+	str_FINDOPT_PERM_0700="( $str_FINDOPT_PERM_GR -o $str_FINDOPT_PERM_GW -o $str_FINDOPT_PERM_GX -o $str_FINDOPT_PERM_WR -o $str_FINDOPT_PERM_WW -o $str_FINDOPT_PERM_WX -o $str_FINDOPT_PERM_SUID -o $str_FINDOPT_PERM_SGID -o $str_FINDOPT_PERM_STICKY )"
+	str_FINDOPT_PERM_0740="( $str_FINDOPT_PERM_GW -o $str_FINDOPT_PERM_GX -o $str_FINDOPT_PERM_WR -o $str_FINDOPT_PERM_WW -o $str_FINDOPT_PERM_WX -o $str_FINDOPT_PERM_SUID -o $str_FINDOPT_PERM_SGID -o $str_FINDOPT_PERM_STICKY )"
+	str_FINDOPT_PERM_0750="( $str_FINDOPT_PERM_GW -o $str_FINDOPT_PERM_WR -o $str_FINDOPT_PERM_WW -o $str_FINDOPT_PERM_WX -o $str_FINDOPT_PERM_SUID -o $str_FINDOPT_PERM_SGID -o $str_FINDOPT_PERM_STICKY )"
+	str_FINDOPT_PERM_0755="( $str_FINDOPT_PERM_GW -o $str_FINDOPT_PERM_WW -o $str_FINDOPT_PERM_SUID -o $str_FINDOPT_PERM_SGID -o $str_FINDOPT_PERM_STICKY )"
+	str_FINDOPT_PERM_775="( $str_FINDOPT_PERM_WW )"
+
+	str_REGEX_BEFORE_PERM_ALL_MATCH='^[0-9]+ [0-9]+ '
+	str_REGEX_FOR_PERM_OR='.r........'
+	str_REGEX_FOR_PERM_OW='..w.......'
+	str_REGEX_FOR_PERM_OX='...[xs]......'
+	str_REGEX_FOR_FILES_PERM_OX='-..[xs]......'
+	str_REGEX_FOR_PERM_GR='....r.....'
+	str_REGEX_FOR_FILES_PERM_GR='-....r.....'
+	str_REGEX_FOR_PERM_GW='.....w....'
+	str_REGEX_FOR_FILES_PERM_GW='-.....w....'
+	str_REGEX_FOR_PERM_GX='......[xs]...'
+	str_REGEX_FOR_FILES_PERM_GX='-.....[xs]...'
+	str_REGEX_FOR_PERM_WR='.......r..'
+	str_REGEX_FOR_FILES_PERM_WR='-......r..'
+	str_REGEX_FOR_PERM_WW='........w.'
+	str_REGEX_FOR_FILES_PERM_WW='-.......w.'
+	str_REGEX_FOR_PERM_WX='.........[xt]'
+	str_REGEX_FOR_FILES_PERM_WX='-........[xt]'
+	str_REGEX_FOR_PERM_SUID='-..[sS]......'
+	str_REGEX_FOR_PERM_SGID='-.....[sS]...'
+	str_REGEX_FOR_PERM_STICKY='.........[tT]'
+	str_REGEX_FOR_PERM_ANY='..........'
+	str_REGEX_FOR_DEVICES_WW='[bc].......w.'
+
+	str_REGEX_FOR_PERM_0600="${str_REGEX_BEFORE_PERM_ALL_MATCH}($str_REGEX_FOR_FILES_PERM_OX|$str_REGEX_FOR_FILES_PERM_GR|$str_REGEX_FOR_FILES_PERM_GW|$str_REGEX_FOR_FILES_PERM_GX|$str_REGEX_FOR_FILES_PERM_WR|$str_REGEX_FOR_FILES_PERM_WW|$str_REGEX_FOR_FILES_PERM_WX|$str_REGEX_FOR_PERM_SUID|$str_REGEX_FOR_PERM_SGID|$str_REGEX_FOR_PERM_STICKY) "	
+	str_REGEX_FOR_PERM_0640="${str_REGEX_BEFORE_PERM_ALL_MATCH}($str_REGEX_FOR_FILES_PERM_OX|$str_REGEX_FOR_FILES_PERM_GW|$str_REGEX_FOR_FILES_PERM_GX|$str_REGEX_FOR_FILES_PERM_WR|$str_REGEX_FOR_FILES_PERM_WW|$str_REGEX_FOR_FILES_PERM_WX|$str_REGEX_FOR_PERM_SUID|$str_REGEX_FOR_PERM_SGID|$str_REGEX_FOR_PERM_STICKY) "
+	
+	str_BACKGROUND_PROCESS_PIDS=''
+	str_TAGS_TO_BE_MERGED=''
+}
+
+do_we_need_to_update_cache()
+{
+	if [ $b_FORCE_FIND -ne 0 -o -f "$str_FIND_FILES_CACHE_UNUSABLE_PATH" -o ! -f "$str_FIND_FILES_CACHE_PATH" ]
+	then
+		return 0
+	fi
+
+	str_CREATION_YEAR=`ls -l "$str_FIND_FILES_CACHE_PATH" | tr -s ' ' | cut -d" " -f8 | $AWK '{if(! match($1,":")) print $1 }'`
+	if [ ! -z "$str_CREATION_YEAR" ]
+	then
+		return 0
+	fi
+
+	str_CREATION_DATE_TIME=`ls -l "$str_FIND_FILES_CACHE_PATH" | tr -s ' ' | cut -d" " -f6,7,8`
+	str_CREATION_MONTH=`echo $str_CREATION_DATE_TIME | cut -d" " -f1`
+	case "$str_CREATION_MONTH" in
+		Jan) i_CREATION_MONTH=1 ;;
+		Feb) i_CREATION_MONTH=2 ;;
+		Mar) i_CREATION_MONTH=3 ;;
+		Apr) i_CREATION_MONTH=4 ;;
+		May) i_CREATION_MONTH=5 ;;
+		Jun) i_CREATION_MONTH=6 ;;
+		Jul) i_CREATION_MONTH=7 ;;
+		Aug) i_CREATION_MONTH=8 ;;
+		Sep) i_CREATION_MONTH=9 ;;
+		Oct) i_CREATION_MONTH=10 ;;
+		Nov) i_CREATION_MONTH=11 ;;
+		Dec) i_CREATION_MONTH=12 ;;
+	esac
+
+	i_CREATION_DAY=`echo $str_CREATION_DATE_TIME | cut -d" " -f2`
+	i_CREATION_HOUR=`echo $str_CREATION_DATE_TIME | cut -d" " -f3| cut -d":" -f1`
+	i_CREATION_MINUTE=`echo $str_CREATION_DATE_TIME | cut -d" " -f3| cut -d":" -f2`
+
+	i_MINUTES_SINCE_CREATION=`expr $i_CREATION_MINUTE + $i_CREATION_HOUR '*' 60 + $i_CREATION_DAY '*' 1440 + $i_CREATION_MONTH '*' 43200`
+
+	i_CURRENT_DAY=`date +%d`
+	i_CURRENT_MONTH=`date +%m`
+	i_CURRENT_HOUR=`date +%H`
+	i_CURRENT_MINUTE=`date +%M`
+
+	i_CURRENT_MINUTES_SINCE_BEGINNION_OF_YEAR=`expr $i_CURRENT_MINUTE + $i_CURRENT_HOUR '*' 60 + $i_CURRENT_DAY '*' 1440 + $i_CURRENT_MONTH '*' 43200`
+
+	i_MINUTES_SINCE_CACTHE_UPDATE=`expr $i_CURRENT_MINUTES_SINCE_BEGINNION_OF_YEAR - $i_MINUTES_SINCE_CREATION`
+
+	if [ $i_CREATION_MONTH -gt $i_CURRENT_MONTH -o \
+		\( $i_CREATION_MONTH -eq $i_CURRENT_MONTH -a $i_CREATION_DAY -gt $i_CURRENT_DAY \) -o \
+		\( $i_CREATION_MONTH -eq $i_CURRENT_MONTH -a $i_CREATION_DAY -eq $i_CURRENT_DAY -a $i_CREATION_HOUR -gt $i_CURRENT_HOUR \) ]
+	then
+		# This assumes there are 365 days in a year (365 * 24 * 60)
+		# Adjusting if file creation year was in last year
+		i_MINUTES_SINCE_CACTHE_UPDATE=`expr $i_MINUTES_SINCE_CACTHE_UPDATE + 525600`
+	fi
+
+	i_MINUTES_FOR_WHICH_CACHE_IS_VALID=`expr 60 '*' $i_CATCHE_HOURS`
+
+	if [ $i_MINUTES_SINCE_CACTHE_UPDATE -ge $i_MINUTES_FOR_WHICH_CACHE_IS_VALID ]
+	then
+		return 0
+	fi
+
+	return 1
+}
+
+findopts_get_ored_names()
+{
+	if [ $# -eq 0 ]
+	then
+		echo "findopts_get_ored_names() expects one or more arguments." 1>&2
+		exit 1
+	fi
+
+	str_OR_NAME="-name $1"
+	shift
+
+	while [ $# -gt 0 ]
+	do
+		str_OR_NAME="$str_OR_NAME -o -name $1"
+		shift
+	done
+
+	echo "( $str_OR_NAME )"
+}
+
+egrepregex_get_name()
+{
+	echo "$1" | sed -e 's/\(^[^*]\)/\/\1/' -e 's/^\*//' -e 's/\./\\./g' -e 's/\*/.*/g' -e 's/$/$/' -e 's/\/\//\//'
+}
+
+egrepregex_get_ored_names()
+{
+	if [ $# -eq 0 ]
+	then
+		echo "egrepregex_get_ored_names() expects one or more arguments." 1>&2
+		exit 1
+	fi
+
+	str_OR_NAME=`egrepregex_get_name "$1"`
+	shift
+
+	while [ $# -gt 0 ]
+	do
+		str_OR_NAME="${str_OR_NAME}|`egrepregex_get_name $1`"
+		shift
+	done
+
+	echo "$str_OR_NAME"
+}
+
+get_anded_user_group_ids()
+{
+	str_NAMES_LIST=''
+	str_IDS_LIST=''
+	str_OP=''
+	str_FINDOPT_ID=''
+	
+	while [ $# -gt 0 ]
+	do
+		case "$1" in
+			-g)	shift
+				str_NAMES_LIST="$1"
+				str_OP='-g'
+				str_FINDOPT_ID=$str_FINDOPT_GID
+				break
+				;;
+			-u)	shift
+				str_NAMES_LIST="$1"
+				str_OP='-u'
+				str_FINDOPT_ID=$str_FINDOPT_UID
+				break
+				;;
+			*)	echo "Invalid parameter sent to $0: $1" 1>&2
+				;;
+		esac
+		shift
+	done
+	
+
+	for each_name in `echo "$str_NAMES_LIST"`
+	do
+		each_gid=`id $str_OP $each_name 2>/dev/null`
+		
+		if [ -n "$each_gid" ]
+		then
+			str_IDS_LIST="$str_IDS_LIST $each_gid"
+			continue
+		fi
+		if [ "$str_OP" = "-g" ]
+		then
+			each_gid=`grep "^$each_name" /etc/group|cut -d: -f3`
+		fi
+		if [ -n "$each_gid" ]
+		then
+			echo "Error: id command didn't return data for $str_FINDOPT_ID: $each_name" >>"$str_FIND_ERRORS_PATH"
+		fi
+	done
+	
+	str_IDS_LIST=`echo $str_IDS_LIST | sed -e 's/^[[:space:]]//'`
+	str_FIND_IDS=`echo "$str_IDS_LIST" | sed -e "s/ / -a ! $str_FINDOPT_ID /g"`
+	str_FIND_IDS="( ! $str_FINDOPT_ID $str_FIND_IDS )"
+	echo "$str_FIND_IDS"
+}
+
+findopts_construct_parameter_segment()
+{
+	i_FILE_PATH_INDEX=$i_FIND_FILE_PATH_INDEX
+	str_TYPE=''
+	str_NAMES=''
+	str_NAMES_REGEX=''
+	str_OTHER=''
+	str_TAG=''
+	str_REGEX=''
+
+	while [ $# -gt 0 ]
+	do
+		case "$1" in
+			-b|-c|-d|-p|-f|-l|-s|-D)
+				if [ "$1" = "-b" -o "$1" = "-c" ]
+				then
+					i_FILE_PATH_INDEX=$i_FIND_FILE_DEVICE_INDEX
+				fi
+				
+				str_THIS_TYPE="-type `echo $1 | sed -e's/^-//'`"
+				if [ -n "$str_TYPE" ]
+				then
+					str_TYPE="$str_TYPE -o $str_THIS_TYPE"
+				else
+					str_TYPE="$str_THIS_TYPE"
+				fi
+				;;
+			-n)	shift
+				str_NAMES=" `findopts_get_ored_names $1` "
+				str_NAMES_REGEX=`egrepregex_get_ored_names $1`
+				;;
+			-t)	shift
+				str_TAG="$1"
+				;;
+			-o)	shift
+				str_OTHER="$1"
+				;;
+			-r)	shift
+				str_REGEX="$1"
+				;;
+			*)	echo "Invalid parameter sent to $0: $1" 1>&2
+				;;
+		esac
+		shift
+	done
+
+	if [ -z "$str_TAG" ]
+	then
+		echo "-t parameter can not be empty." 1>&2
+		exit 1
+	fi
+
+	if [ -n "$str_TYPE" ]
+	then
+		str_TYPE="( $str_TYPE )"
+	fi
+
+	str_FINDOPT_FOR_ROOT_SEARCH="$str_FINDOPT_FOR_ROOT_SEARCH ${str_OR_SEPARATOR} ( ${str_NAMES} ${str_TYPE} ${str_OTHER}"
+	if [ "$OS" != "$OS_TYPE_HPUX" ]
+	then
+		# On Aix/Linux/SunOS -ls is directly supported
+		str_FINDOPT_FOR_ROOT_SEARCH="$str_FINDOPT_FOR_ROOT_SEARCH -ls"
+	else
+		# On HP-UX -ls is not supported. Therefore, we will pipe the output of find with
+		# xargs ls -dils
+		str_FINDOPT_FOR_ROOT_SEARCH="$str_FINDOPT_FOR_ROOT_SEARCH -print"
+	fi
+	str_FINDOPT_FOR_ROOT_SEARCH="$str_FINDOPT_FOR_ROOT_SEARCH )"
+
+	if [ -n "$str_NAMES_REGEX" ]
+	then
+		if [ -n "$str_REGEX" ]
+		then
+			str_REGEX="$str_REGEX.*($str_NAMES_REGEX)"
+		else
+			str_REGEX="$str_NAMES_REGEX"
+		fi
+	fi
+
+	if [ -n "$str_REGEX" ]
+	then
+		str_TAG_STORE_FILE_PATH="$str_STAGING_DIRECTORY/$str_TAG"
+
+#		echo "egrep \"$str_REGEX\" \"$str_FIND_FILES_CACHE_PATH\" | cut -d' ' -f 11- | sed -e 's/\\\\\\([^\\\\]\\)/\\1/g' > \"$str_TAG_STORE_FILE_PATH\"" >> "$str_GENERATED_SCRIPT_FOR_POST_PROCESSING_PATH"
+		echo "egrep \"$str_REGEX\" \"$str_FIND_FILES_CACHE_PATH\" | cut -d' ' -f ${i_FILE_PATH_INDEX}- | sort | uniq > \"$str_TAG_STORE_FILE_PATH\"" >> "$str_GENERATED_SCRIPT_FOR_POST_PROCESSING_PATH"
+#		echo "if [ ! -s \"$str_TAG_STORE_FILE_PATH\" ] ; then rm -f \"$str_TAG_STORE_FILE_PATH\" ; fi" >> "$str_GENERATED_SCRIPT_FOR_POST_PROCESSING_PATH"
+	fi
+}
+
+findopts_construct_parameter_segment_for_single_executable()
+{
+	str_EXECUTABLE_NAME="$1"
+	str_TAG_NAME=`echo $1 | capitalise_word | sed -e 's/^/f/'`
+	findopts_construct_parameter_segment -f -n "$str_EXECUTABLE_NAME" -t "$str_TAG_NAME" -r "${str_REGEX_BEFORE_PERM_ALL_MATCH}$str_REGEX_FOR_PERM_OX"
+}
+
+exit_if_we_need_not_update_cache_else_clear_old_cache()
+{
+	if do_we_need_to_update_cache
+	then
+		rm -f "$str_FIND_FILES_CACHE_PATH" "$str_FIND_ERRORS_PATH" "$str_FIND_FILES_CACHE_UNUSABLE_PATH"  
+	else
+		exit 0
+	fi
+
+	if check_if_disk_usage_percentage_has_exceeded
+	then
+		write_low_disk_space_message_into_file
+		exit 1
+	fi
+}
+
+process_single_directory_to_be_pruned()
+{
+	case "$OS" in
+		$OS_TYPE_LINUX|$OS_TYPE_HPUX)
+			str_CURRENT_FIND_PRUNE_PARAMETER="-path $1"
+			;;
+		*)
+			str_CURRENT_FIND_PRUNE_PARAMETER="-name `basename \"$1\"`"
+		;;
+	esac
+
+	if [ -n "$str_FIND_PRUNE_PARAMETER" ]
+	then
+		str_FIND_PRUNE_PARAMETER="$str_FIND_PRUNE_PARAMETER -o $str_CURRENT_FIND_PRUNE_PARAMETER"
+	else
+		str_FIND_PRUNE_PARAMETER="$str_CURRENT_FIND_PRUNE_PARAMETER"
+	fi
+}
+
+process_directories_to_be_pruned()
+{
+	str_FINDOPT_PRUNE_EXPRESSION="$str_FINDOPT_PRUNE_REMOTE_FS"
+
+	for str_DIRECTORY_TO_BE_PRUNED in /cdrom /dev /mnt /proc /sys /tcb /vol /xfn
+	do
+		process_single_directory_to_be_pruned "$str_DIRECTORY_TO_BE_PRUNED"
+	done
+
+	while [ $i_DIRECTORIES_TO_BE_PRUNED_COUNT -gt 0 ]
+	do
+		str_DIRECTORY_TO_BE_PRUNED=`eval echo '$'str_DIRECTORY_TO_BE_PRUNED_${i_DIRECTORIES_TO_BE_PRUNED_COUNT}`
+		process_single_directory_to_be_pruned "$str_DIRECTORY_TO_BE_PRUNED"
+		i_DIRECTORIES_TO_BE_PRUNED_COUNT=`expr $i_DIRECTORIES_TO_BE_PRUNED_COUNT - 1`
+	done
+
+	if [ -n "$str_FIND_PRUNE_PARAMETER" ]
+	then
+		str_FIND_PRUNE_PARAMETER="( ( $str_FIND_PRUNE_PARAMETER ) -prune )"
+		str_FINDOPT_PRUNE_EXPRESSION="$str_FINDOPT_PRUNE_EXPRESSION -o $str_FIND_PRUNE_PARAMETER"
+	fi
+	
+	str_FIND_SKIP_FILE_EXPR="*[\"&\|\!'\`]*"
+	str_FINDOPT_PRUNE_EXPRESSION="$str_FINDOPT_PRUNE_EXPRESSION -o ( -name $str_FIND_SKIP_FILE_EXPR -prune )"
+}
+
+process_scan_directories_if_any_or_use_root()
+{
+	if [ $i_DIRECTORIES_TO_BE_SCANNED_COUNT -eq 0 ]
+	then
+		str_SEARCH_PATH_TO_BE_USED='/'
+	fi
+
+	while [ $i_DIRECTORIES_TO_BE_SCANNED_COUNT -gt 0 ]
+	do
+		str_DIRECTORY_TO_BE_SCANNED=`eval echo '$'str_DIRECTORY_TO_BE_SCANNED_${i_DIRECTORIES_TO_BE_SCANNED_COUNT}`
+		if [ -n "$str_SEARCH_PATH_TO_BE_USED" ]
+		then
+			str_SEARCH_PATH_TO_BE_USED="$str_SEARCH_PATH_TO_BE_USED $str_DIRECTORY_TO_BE_SCANNED"
+		else
+			str_SEARCH_PATH_TO_BE_USED="$str_DIRECTORY_TO_BE_SCANNED"
+		fi
+		i_DIRECTORIES_TO_BE_SCANNED_COUNT=`expr $i_DIRECTORIES_TO_BE_SCANNED_COUNT - 1`
+	done
+}
+
+generate_script_for_post_processing()
+{
+	str_GENERATED_SCRIPT_FOR_POST_PROCESSING_PATH="$str_STAGING_DIRECTORY/post_processing_script_${i_PID}_${str_TIMESTAMP}"
+	echo '#!/bin/sh' > "$str_GENERATED_SCRIPT_FOR_POST_PROCESSING_PATH"
+	echo "if [ ! -f \"$str_FIND_FILES_CACHE_PATH\" ]; then echo \"Cache file $str_FIND_FILES_CACHE_PATH doesn't exist.\" 1>&2 ; exit 1 ; fi" >> "$str_GENERATED_SCRIPT_FOR_POST_PROCESSING_PATH"
+	chmod 750 "$str_GENERATED_SCRIPT_FOR_POST_PROCESSING_PATH"
+}
+
+write_low_disk_space_message_into_file()
+{
+	echo "LOW_SPACE_ERROR: Can't run disa-findFiles script because the '$str_STAGING_DIRECTORY' space usage is greater than ${i_MAX_DISK_PERCENTAGE}%. Current disk usage is ${i_DISK_PERCENTAGE_USED}%. Please free up disk space or increase the disk usage percentage for the 'TARGET.MAX_DISK_PERCENTAGE' property." >> "$str_FIND_FILES_CACHE_UNUSABLE_PATH"
+}
+
+create_and_execute_find_timeout_script()
+{
+	echo "#!/bin/sh" > "$str_ALRM_SCRIPT_PATH"
+	echo "i_SIGTERM=$i_SIGTERM" >> "$str_ALRM_SCRIPT_PATH"
+	echo "str_PPNAME=`basename \"$0\"`" >> "$str_ALRM_SCRIPT_PATH"
+	echo "i_FINDFILE_TIMEOUT=$i_FINDFILE_TIMEOUT" >> "$str_ALRM_SCRIPT_PATH"
+	echo "str_FIND_FILES_CACHE_UNUSABLE_PATH=\"$str_FIND_FILES_CACHE_UNUSABLE_PATH\"" >> "$str_ALRM_SCRIPT_PATH"
+
+	sed -e '/^####CODE-FOR-TIME-OUT-CHECK-START####$/,/^####CODE-FOR-TIME-OUT-CHECK-END####$/ !d' "$0" >>"$str_ALRM_SCRIPT_PATH"
+	chmod 700 "$str_ALRM_SCRIPT_PATH"
+	"$str_ALRM_SCRIPT_PATH" </dev/null &
+	return 0
+
+####CODE-FOR-TIME-OUT-CHECK-START####
+	trap 'exit 0' $i_SIGTERM
+
+	if [ $i_FINDFILE_TIMEOUT -eq 0 ]
+	then
+		exit 0
+	fi
+
+	sleep "$i_FINDFILE_TIMEOUT"
+
+	echo "Time out occured: Bailing out from cache creation as stipulated number of $i_FINDFILE_TIMEOUT seconds have already elapsed. Please pass a larger value to complete cache creation." >> "$str_FIND_FILES_CACHE_UNUSABLE_PATH"
+
+	i_PID=`ps -ef | grep "$str_PPNAME" | sed -e 's/^[ ]*//' -e 's/  */ /g' | cut -d' ' -f2`
+	if [ -n "$i_PID" ]
+	then
+		kill -$i_SIGTERM $i_PID 1>/dev/null 2>/dev/null
+	fi
+
+	exit 0
+
+####CODE-FOR-TIME-OUT-CHECK-END####
+}
+
+kill_a_script_with_path()
+{
+	str_SCRIPT_NAME=`basename "$1"`
+	i_PID=`ps -ef | grep "$str_SCRIPT_NAME" | sed -e 's/^[ ]*//' -e 's/  */ /g' | cut -d' ' -f2`
+
+	if [ ! -z "$i_PID" ]
+	then
+		kill -$i_SIGTERM $i_PID 1>/dev/null 2>/dev/null
+	fi
+}
+
+finalise()
+{
+	kill_a_script_with_path "$str_ALRM_SCRIPT_PATH"
+
+	rm -f "$str_GENERATED_SCRIPT_FOR_POST_PROCESSING_PATH" "$str_FIND_FILES_CACHE_PATH" "$str_ALRM_SCRIPT_PATH" "${str_FIND_FILES_CACHE_PATH}.1" "${str_FIND_FILES_CACHE_PATH}.2" ./Configuration_findFiles
+	rm -f "$str_TEMP_PASSWD_FILE"
+	touch "$str_FIND_FILES_CACHE_PATH"
+}
+
+handle_sigterm()
+{
+	touch "$str_FIND_FILES_CACHE_UNUSABLE_PATH"
+
+	kill_find_processes_running_in_the_background
+
+	finalise
+	exit 1
+}
+
+check_if_disk_usage_percentage_has_exceeded()
+{
+	i_DISK_PERCENTAGE_USED=`df -k "$str_STAGING_DIRECTORY" | sed -e '2,$!d' | grep "%" | cut -d"%" -f1 | $AWK '{ print $NF }'`
+
+	if [ -z "$i_DISK_PERCENTAGE_USED" -o `echo "$i_DISK_PERCENTAGE_USED" | egrep -c '[^0-9]'` -ne 0 ]
+	then
+		echo "Invalid value for disk percentage: $i_DISK_PERCENTAGE_USED" 1>&2
+		return 0
+	fi
+
+	if [ $i_DISK_PERCENTAGE_USED -ge $i_MAX_DISK_PERCENTAGE ]
+	then
+		return 0
+	fi
+
+	return 1
+}
+
+kill_find_processes_running_in_the_background()
+{
+	if [ -n "$str_BACKGROUND_PROCESS_PIDS" ]
+	then
+		str_BACKGROUND_PROCESS_PIDS=`echo "$str_BACKGROUND_PROCESS_PIDS"|sed -e 's/,/ /g'`
+		kill -$i_SIGKILL $str_BACKGROUND_PROCESS_PIDS >/dev/null 2>&1
+	fi
+}
+
+get_global_find_results_ready_for_post_processing()
+{
+	cat "${str_FIND_FILES_CACHE_PATH}.1" "${str_FIND_FILES_CACHE_PATH}.2" |
+	if [ "$OS" = "$OS_TYPE_HPUX" ]
+	then
+		sed -e 's/^/"/' -e 's/$/"/' | xargs ls -dils
+	else
+		tee
+	fi 2>>"$str_FIND_ERRORS_PATH" | sed -e 's/^[[:space:]]*//' | tr -s ' ' >"$str_FIND_FILES_CACHE_PATH"
+
+	#The intermediate cache file is no longer required
+	rm -f "${str_FIND_FILES_CACHE_PATH}.1" "${str_FIND_FILES_CACHE_PATH}.2"
+}
+
+wait_for_find_processes_to_exit ()
+{
+	if [ -z "$1" ]
+	then
+		i_PROC_COUNT=1
+	else
+		i_PROC_COUNT="$1"
+	fi
+	if [ -n "$str_BACKGROUND_PROCESS_PIDS" ]
+	then
+		while [ `UNIX95=  ps -p $str_BACKGROUND_PROCESS_PIDS | grep -v defunct | wc -l` -gt "$i_PROC_COUNT" ]
+		do
+			if check_if_disk_usage_percentage_has_exceeded
+			then
+				write_low_disk_space_message_into_file
+				kill_find_processes_running_in_the_background
+				break
+			fi
+			sleep 3
+		done
+	fi
+}
+append_user_group_to_home_dir_noncomp_files()
+{
+#This function updates the TAG (NC files) with expected user/group for remediation
+# Format: <file>::<expected_user>
+# Format: <file>:::<expected_group>
+
+append_user_group -g fV22351
+append_user_group -u fV914
+append_user_group -g fV22361
+append_user_group -u fV904
+}
+append_user_group()
+{
+	while [ $# -gt 0 ]
+	do
+		case "$1" in
+			-g)	shift
+				str_OP='-g'
+				str_TAG=$1
+				break
+				;;
+			-u)	shift
+				str_OP='-u'
+				str_TAG=$1
+				break
+				;;
+			*)	echo "Invalid parameter sent to $0: $1" 1>&2
+				;;
+		esac
+		shift
+	done
+
+	for str_EACH_FILE in `ls $str_TAG-* 2>>"$str_FIND_ERRORS_PATH"`
+	do
+		str_USER=`echo ${str_EACH_FILE} | cut -d- -f3`
+		
+		if [ "$str_OP" = "-g" ]
+		then
+			str_GROUP=`id -ng "$str_USER" 2>>"$str_FIND_ERRORS_PATH"`
+			
+			if [ -z "$str_GROUP" ]
+			then
+				echo "Error: No group set for user: $str_USER" >>"$str_FIND_ERRORS_PATH"
+				continue
+			else
+				str_STR_TOBE_APPENDED=":::${str_GROUP}"
+			fi
+			
+		else
+			str_STR_TOBE_APPENDED="::$str_USER"
+		fi
+		
+		sed -e "s/$/$str_STR_TOBE_APPENDED/g" "${str_EACH_FILE}" > "${str_EACH_FILE}_tmp" 2>>"$str_FIND_ERRORS_PATH"
+		mv "${str_EACH_FILE}_tmp" "${str_EACH_FILE}" 2>>"$str_FIND_ERRORS_PATH"
+	done	
+}
+wait_for_find_processes_to_exit_and_do_post_processing()
+{
+	wait_for_find_processes_to_exit
+
+	get_global_find_results_ready_for_post_processing
+	"$str_GENERATED_SCRIPT_FOR_POST_PROCESSING_PATH"
+	
+	append_user_group_to_home_dir_noncomp_files
+	
+	cat "$str_STAGING_DIRECTORY"/fLIF-Temp-*  2>>"$str_FIND_ERRORS_PATH" | sort | uniq  >"$str_STAGING_DIRECTORY/fLocalInitFiles"
+	rm -f "$str_STAGING_DIRECTORY"/fLIF-Temp-*
+	cat "$str_STAGING_DIRECTORY"/fLIFPERM-Temp-*  2>>"$str_FIND_ERRORS_PATH" | sort | uniq  >"$str_STAGING_DIRECTORY/fLocalInitFilesPerm"
+	rm -f "$str_STAGING_DIRECTORY"/fLIFPERM-Temp-*
+	cat "$str_STAGING_DIRECTORY"/fV914-Temp-* 2>>"$str_FIND_ERRORS_PATH" | sort | uniq  >"$str_STAGING_DIRECTORY/fV914"
+	rm -f "$str_STAGING_DIRECTORY"/fV914-Temp-*
+	cat "$str_STAGING_DIRECTORY"/fV915-Temp-* 2>>"$str_FIND_ERRORS_PATH" | sort | uniq >"$str_STAGING_DIRECTORY/fV915" 
+	rm -f "$str_STAGING_DIRECTORY"/fV915-Temp-*
+	cat "$str_STAGING_DIRECTORY"/fV22351-Temp-* 2>>"$str_FIND_ERRORS_PATH" | sort | uniq  >"$str_STAGING_DIRECTORY/fV22351" 
+	rm -f "$str_STAGING_DIRECTORY"/fV22351-Temp-*
+	cat "$str_STAGING_DIRECTORY"/fV904-HomeFilesDirsOwn-* 2>>"$str_FIND_ERRORS_PATH" | sort | uniq >"$str_STAGING_DIRECTORY/fV904" 
+	rm -f "$str_STAGING_DIRECTORY"/fV904-HomeFilesDirsOwn-*
+	cat "$str_STAGING_DIRECTORY"/fV22361-HomeFilesDirsOwn-* 2>>"$str_FIND_ERRORS_PATH" | sort | uniq  >"$str_STAGING_DIRECTORY/fV22361" 
+	rm -f "$str_STAGING_DIRECTORY"/fV22361-HomeFilesDirsOwn-*
+	if [ "$OS" = "$OS_TYPE_AIX" ]
+	then
+		str_GETFACL_COMMAND="xargs ls -le 2>>\"$str_FIND_ERRORS_PATH\" | $AWK -F \" \" -v field=9 '\$1 ~ \".*\\\+\" {print \$field}' "
+	else
+		str_GETFACL_COMMAND="xargs ls -l 2>>\"$str_FIND_ERRORS_PATH\" | $AWK -F \" \" -v field=9 '\$1 ~ \".*\\\+\" {print \$field}' "
+	fi
+	case "$OS" in
+		$OS_TYPE_LINUX)
+			[ ! -s "$str_STAGING_DIRECTORY"/fManPageExtACL-temp ] || cat "$str_STAGING_DIRECTORY"/fManPageExtACL-temp 2>>"$str_FIND_ERRORS_PATH"  | eval "$str_GETFACL_COMMAND 2>>\"$str_FIND_ERRORS_PATH\"" >"$str_STAGING_DIRECTORY/fManPageExtACL" 2>>"$str_FIND_ERRORS_PATH"
+			rm -f "$str_STAGING_DIRECTORY"/fManPageExtACL-temp
+			;;
+		$OS_TYPE_SUNOS )
+			mv -f "$str_STAGING_DIRECTORY"/fManPageExtACL-temp "$str_STAGING_DIRECTORY/fManPageExtACL" 2>>"$str_FIND_ERRORS_PATH"
+			;;
+		$OS_TYPE_HPUX | $OS_TYPE_AIX )
+			[ ! -s "$str_STAGING_DIRECTORY"/fManPageExtACL-temp ] || cat "$str_STAGING_DIRECTORY"/fManPageExtACL-temp 2>>"$str_FIND_ERRORS_PATH" | eval "$str_GETFACL_COMMAND 2>>\"$str_FIND_ERRORS_PATH\""  >"$str_STAGING_DIRECTORY/fManPageExtACL" 2>>"$str_FIND_ERRORS_PATH"
+
+			cat "$str_STAGING_DIRECTORY"/fLibFiles 2>>"$str_FIND_ERRORS_PATH" | eval "$str_GETFACL_COMMAND 2>>\"$str_FIND_ERRORS_PATH\"" >"$str_STAGING_DIRECTORY/fLibFilesExtACL" 2>>"$str_FIND_ERRORS_PATH"
+
+			cat "$str_STAGING_DIRECTORY"/fSyslogFileList 2>>"$str_FIND_ERRORS_PATH" | eval "$str_GETFACL_COMMAND 2>>\"$str_FIND_ERRORS_PATH\"" >"$str_STAGING_DIRECTORY/fSyslogFilesExtACL"
+			rm -f "$str_STAGING_DIRECTORY"/fManPageExtACL-temp
+			;;
+	esac
+	cat "$str_STAGING_DIRECTORY"/fNetDaemons 2>>"$str_FIND_ERRORS_PATH" | eval "$str_GETFACL_COMMAND 2>>\"$str_FIND_ERRORS_PATH\"" >"$str_STAGING_DIRECTORY/fNetDaemonsExtACL" 2>>"$str_FIND_ERRORS_PATH"
+	cat "$str_STAGING_DIRECTORY"/fSysCMDAcl-temp 2>>"$str_FIND_ERRORS_PATH" | eval "$str_GETFACL_COMMAND 2>>\"$str_FIND_ERRORS_PATH\"" >"$str_STAGING_DIRECTORY/fSysCMDPermExtACL" 2>>"$str_FIND_ERRORS_PATH"
+	rm -f "$str_STAGING_DIRECTORY"/fSysCMDAcl-temp
+
+	cat "$str_STAGING_DIRECTORY"/fAuditTools 2>>"$str_FIND_ERRORS_PATH" | eval "$str_GETFACL_COMMAND 2>>\"$str_FIND_ERRORS_PATH\"" >"$str_STAGING_DIRECTORY/fAuditToolsExtACL" 2>>"$str_FIND_ERRORS_PATH"
+	cat "$str_STAGING_DIRECTORY"/fCronScripts 2>>"$str_FIND_ERRORS_PATH" | eval "$str_GETFACL_COMMAND 2>>\"$str_FIND_ERRORS_PATH\"" >"$str_STAGING_DIRECTORY/fCronScriptsExtACL" 2>>"$str_FIND_ERRORS_PATH"
+	cat "$str_STAGING_DIRECTORY"/fGlobalInitFiles 2>>"$str_FIND_ERRORS_PATH" | eval "$str_GETFACL_COMMAND 2>>\"$str_FIND_ERRORS_PATH\"" >"$str_STAGING_DIRECTORY/fGlobalInitFilesExtACL" 2>>"$str_FIND_ERRORS_PATH"
+	cat "$str_STAGING_DIRECTORY"/fLocalInitFiles 2>>"$str_FIND_ERRORS_PATH" | eval "$str_GETFACL_COMMAND 2>>\"$str_FIND_ERRORS_PATH\"" >"$str_STAGING_DIRECTORY/fLocalInitFilesExtACL" 2>>"$str_FIND_ERRORS_PATH"
+	cat "$str_STAGING_DIRECTORY"/fMibfile 2>>"$str_FIND_ERRORS_PATH" | eval "$str_GETFACL_COMMAND 2>>\"$str_FIND_ERRORS_PATH\"" >"$str_STAGING_DIRECTORY/fMibfileExtACL" 2>>"$str_FIND_ERRORS_PATH"
+	cat "$str_STAGING_DIRECTORY"/fNisNisPlusYpFileList 2>>"$str_FIND_ERRORS_PATH" | eval "$str_GETFACL_COMMAND 2>>\"$str_FIND_ERRORS_PATH\"" >"$str_STAGING_DIRECTORY/fNisNisPlusYpExtACL" 2>>"$str_FIND_ERRORS_PATH"
+	cat "$str_STAGING_DIRECTORY"/fRcScriptFiles 2>>"$str_FIND_ERRORS_PATH" | eval "$str_GETFACL_COMMAND 2>>\"$str_FIND_ERRORS_PATH\"" >"$str_STAGING_DIRECTORY/fRcScriptFilesExtACL" 2>>"$str_FIND_ERRORS_PATH"
+	cat "$str_STAGING_DIRECTORY"/fSndDevices 2>>"$str_FIND_ERRORS_PATH" | eval "$str_GETFACL_COMMAND 2>>\"$str_FIND_ERRORS_PATH\"" >"$str_STAGING_DIRECTORY/fSndDevicesExtACL" 2>>"$str_FIND_ERRORS_PATH"
+	cat "$str_STAGING_DIRECTORY"/fXauthority 2>>"$str_FIND_ERRORS_PATH" | eval "$str_GETFACL_COMMAND 2>>\"$str_FIND_ERRORS_PATH\"" >"$str_STAGING_DIRECTORY/fXauthorityExtACL" 2>>"$str_FIND_ERRORS_PATH"
+		
+	for str_TAG_FILE in "$str_STAGING_DIRECTORY"/fV904-HomeFilesDirsOwn-* "$str_STAGING_DIRECTORY"/fV22361-HomeFilesDirsOwn-*
+	do
+		if [ ! -s "$str_TAG_FILE" ]
+		then
+			rm -f "$str_TAG_FILE" 2>>"$str_FIND_ERRORS_PATH"
+		fi
+	done
+	
+	#check and merge any tags if required
+	if [ -z "$str_TAGS_TO_BE_MERGED" ]
+	then
+		return
+	fi
+	
+	for str_TAG_TO_BE_MERGED in $str_TAGS_TO_BE_MERGED
+	do
+		merge_one_tag_to_another "$str_TAG_TO_BE_MERGED"
+	done
+}
+
+execute_find_for_root_or_scan_directories()
+{
+	generate_script_for_post_processing
+
+	str_FINDOPT_FOR_ROOT_SEARCH="$str_FINDOPT_PRUNE_EXPRESSION"
+
+	######################################################################
+	# Rule:      fHttpd
+	# Search:    Search for the location of the HTTP servers.
+	# Criteria:  Just be there to be examined later for versions.
+	# Action:    Display file path listing with "fHttpd" prefix
+	#
+	#findopts_construct_parameter_segment_for_single_executable httpd
+
+	######################################################################
+	# Rule:      fMibfile
+	# Search:    Search for the location of all mib files.
+	# Criteria:  * must end with .mib and be a regular file
+	# Action:    Display file path listing with "fMibfile" prefix
+	[ -n "$str_PERM_FOR_MIBFILES" ] || str_PERM_FOR_MIBFILES="$str_REGEX_FOR_PERM_0640"
+	findopts_construct_parameter_segment -f -n '*.mib *.MIB' -t fMibfile
+	findopts_construct_parameter_segment -f -n '*.mib *.MIB' -r "$str_PERM_FOR_MIBFILES" -t fMibfilePerm
+	
+	######################################################################
+	# Rule:      fThunderbird
+	# Search:    Search for the location of the Thunderbird program, if there.
+	# Criteria:  must be executable and be over 2MB in size and be named thunderbird
+	# Action:    Display file path listing with "fThunderbird" prefix
+	#
+	#findopts_construct_parameter_segment_for_single_executable thunderbird
+
+	######################################################################
+	# Rule:      fSnort
+	# Search:    Search for the location of the snort program, if there.
+	# Criteria:
+	# Action:    Display file path listing with "fSnort" prefix
+	#
+	#( -type f ) <- taken out. Would not "tag" the snort executable with
+	#               the file type in the search string.
+	#findopts_construct_parameter_segment_for_single_executable snort
+
+	######################################################################
+	# Rule:      fMcafee
+	# Search:    Search for the location of the Mcafee program, if there.
+	# Criteria:
+	# Action:    Display file path listing with "fMcafee" prefix
+	#findopts_construct_parameter_segment -f -n '*clean.dat *names.dat *scan.dat' -t fMcafee
+
+	######################################################################
+	# Rule:      fNamed
+	# Search:    Search for the location of the named program.
+	# Criteria:
+	# Action:    Display file path listing with "fNamed" prefix
+	#
+	#findopts_construct_parameter_segment_for_single_executable named
+
+	######################################################################
+	# Rule:      fInNamed
+	# Search:    Search for the location of the in.named program.
+	# Criteria:
+	# Action:    Display file path listing with "fInNamed" prefix
+	#
+	#findopts_construct_parameter_segment_for_single_executable in.named
+
+	######################################################################
+	# Rule:      fSunInFtpd
+	# Search:    Search for the location of the SunInFtpd program, if there.
+	#            The "SunIn" part of the label simply means the Sun supplied
+	#            vendor form of ftpd.
+	# Criteria:
+	# Action:    Display file path listing with "fSunInFtpd" prefix
+	#
+	#findopts_construct_parameter_segment -f -n in.ftpd -t fSunInFtpd
+
+	######################################################################
+	# Rule:      fCamStat
+	# Search:    Search for the location of the CamStat program, if there.
+	# Criteria:
+	# Action:    Display file path listing with "fCamStat" prefix
+	#
+	#findopts_construct_parameter_segment_for_single_executable camstat
+
+	######################################################################
+	# Rule:      fTshark
+	# Search:    Search for the location of the Tshark program, if there.
+	# Criteria:
+	# Action:    Display file path listing with "fTshark" prefix
+	#
+	findopts_construct_parameter_segment_for_single_executable tshark
+
+	######################################################################
+	# Rule:      fWireshark
+	# Search:    Search for the location of the wireshark program, if there.
+	# Criteria:
+	# Action:    Display file path listing with "fWireshark" prefix
+	#
+	findopts_construct_parameter_segment_for_single_executable wireshark
+
+	######################################################################
+	# Rule:      fTcpdump
+	# Search:    Search for the location of the tcpdump program, if there.
+	# Criteria:
+	# Action:    Display file path listing with "fTcpdump" prefix
+	#
+	findopts_construct_parameter_segment_for_single_executable tcpdump
+
+	######################################################################
+	# Rule:      fSnoop
+	# Search:    Search for the location of the snoop program, if there.
+	# Criteria:
+	# Action:    Display file path listing with "fSnoop" prefix
+	#
+	findopts_construct_parameter_segment_for_single_executable snoop
+	
+	######################################################################
+	# Rule:      fNc
+	# Search:    Search for the location of the nc program, if there.
+	# Criteria:
+	# Action:    Display file path listing with "fNc" prefix
+	#
+	findopts_construct_parameter_segment_for_single_executable nc
+
+	######################################################################
+	# Rule:      fNetcat
+	# Search:    Search for the location of the netcat program, if there.
+	# Criteria:
+	# Action:    Display file path listing with "fNetcat" prefix
+	#
+	findopts_construct_parameter_segment_for_single_executable netcat
+
+	######################################################################
+	# Rule:      fEthereal
+	# Search:    Search for the location of the Ethereal program, if there.
+	# Criteria:
+	# Action:    Display file path listing with "fEthereal" prefix
+	#
+	findopts_construct_parameter_segment_for_single_executable ethereal
+
+	######################################################################
+	# Rule:      fTraceroute
+	# Search:    Search for the location of the Ethereal program, if there.
+	# Criteria:
+	# Action:    Display file path listing with "fEthereal" prefix
+	#
+	#findopts_construct_parameter_segment_for_single_executable traceroute
+
+	######################################################################
+	# Rule:      fVncServer
+	# Search:    Search for the location of the VncServer program, if there.
+	# Criteria:
+	# Action:    Display file path listing with "fVncServer" prefix
+	#
+	#findopts_construct_parameter_segment_for_single_executable vncserver
+
+	######################################################################
+	# Rule:      fSnmpConf
+	# Search:    Search for the location of the VncServer program, if there.
+	# Criteria:
+	# Action:    Display file path listing with "fSnmpConf" prefix
+	#
+	#findopts_construct_parameter_segment -f -n snmpd.conf -t fSnmpConf
+
+	######################################################################
+	# Rule:      fGenWuFtpd
+	# Search:    Search for the location of the GenWuFtpd program, if there.
+	#            The "Gen" part of the label simply means the generic, non-
+	#            vendor form of wu-ftpd that can be downloaded either as a
+	#            compilable source OR downloaded as an already pre-compiled
+	#            binary "...tar.gz" file.
+	# Criteria:
+	# Action:    Display file path listing with "fGenWuFtpd" prefix
+	#
+	#findopts_construct_parameter_segment_for_single_executable ftpd
+
+	######################################################################
+	# Rule:      fAuditType
+	# Search:    Search for the location of audit conf files.
+	# Criteria:
+	# Action:    Display file path listing with "fAuditType" prefix
+	#
+	#findopts_construct_parameter_segment -f -n "audit.rules filter.conf" -t fAuditType
+
+	######################################################################
+	# Rule:      squid
+	# Search:    Search for the location of the squid program, if there.
+	# Criteria:  must be executable.
+	# Action:    Display file path listing with "fSquid" prefix
+	#
+	#findopts_construct_parameter_segment_for_single_executable squid
+
+	######################################################################
+	# Rule:      fNetDaemons
+	# Search:    Search for network service daemons and verify that
+	#            ownership and permissions are correct.
+	# Criteria:  * must have the name of a known network service daemon
+	#              (The "*" in the filename specifies account for files
+	#              that are prefixed with "in."; "tftpd" is covered under
+	#              "*ftpd"; "ntalkd" is covered under "*talkd")
+	#            * must be a regular file
+	#            * must have any of the following permission modes set:
+	#                 the "set-UID" bit,
+	#                 the "set-GID" bit,
+	#                 the "sticky" bit, or
+	#                 any write permission bit
+	# Action:    Display directory listing with "fNetDaemons" prefix
+	strNetDaemons='inetd *admind *sshd *fingerd *ftpd *httpd *identd *lpd *mountd *nfsd *pppd *remshd *rexecd *rlogd *rlogind *rquotad *rshd *rsprayd *rstatd *rusersd *rwalld *rwhod *snmpd *snmptrapd *talkd *tcpd *telnetd *timed *pcnfsd'
+	findopts_construct_parameter_segment -f -n "$strNetDaemons" -t fNetDaemons
+
+	######################################################################
+	# Rule:      fRhosts
+	# Search:    Search for any network host-access files that enable
+	#            password-free access to peer systems
+	# Criteria:  * must have the name "hosts.equiv," ".netrc," ".nodes,"
+	#              or ".rhosts"
+	#            * must be a regular file
+	# Action:    Display directory listing with "fRhosts" prefix
+	#
+	[ -n "$str_RHOSTS" ] || str_RHOSTS='hosts.equiv .netrc .nodes .rhosts .shosts shosts.equiv'
+	findopts_construct_parameter_segment -f -n "$str_RHOSTS" -t fRhosts
+
+	######################################################################
+	# Rule:      fSecTools
+	# Search:    Search for any files indicating the presence of a
+	#            security assessment tool.
+	# Criteria:  * must have the name "cops," "esmd," "itad," "spi,"
+	#              "tiger," or "tripwire"
+	#            * must be a regular file
+	# Action:    Display directory listing with "fSecTools" prefix
+	#str_SECURITY_TOOLS='cops esmd itaagtd itamgrd spi SpiNet tiger tripwire aide c50a tera merlin iptables ipchains Start-SRR Tara tara merlin snare issDaemon'
+	#findopts_construct_parameter_segment -f -n "$str_SECURITY_TOOLS" -t fSecTools
+
+	######################################################################
+	# This was searching for world writable directories without the sticky
+	# bit set, indicating that any directory can be world writable if it has
+	# the sticky bit set - not true.  There are certain public directories:
+	# $STAGE_DIR/var$STAGE_DIR/var/spool/uucppublic /var/pkg, and, just to be generous,
+	# any directory which is named tmp or temp.  TW 5/21/01
+	# Rule:      fSticky
+	# Search:    Search for any directory objects that have the sticky-bit
+	#            ("t") assigned.
+	# Criteria:  * must be a directory
+	#            * have the world-write permission AND the "sticky" bit not set
+	# Action:    Display directory listing with "fSticky" prefix
+	#
+	#str_STICK_PERM_DIRECTORIES='tmp temp pkg uucppublic'
+	#str_STICK_PERM_PARAMETER_NAMES=`findopts_get_ored_names $str_STICK_PERM_DIRECTORIES`
+	#str_STICK_PERM_PARAMETER_NAMES_REGEX=`egrepregex_get_ored_names $str_STICK_PERM_DIRECTORIES`
+	#str_STICK_PERM_PARAMETER="( ( $str_STICK_PERM_PARAMETER_NAMES $str_FINDOPT_PERM_WW ! $str_FINDOPT_PERM_STICKY ) -o ( $str_FINDOPT_PERM_STICKY -a ( $str_FINDOPT_UID +20 -o $str_FINDOPT_GID +19 ) ) )"
+	#findopts_construct_parameter_segment -d -t fSticky -o "$str_STICK_PERM_PARAMETER" -r "${str_REGEX_BEFORE_PERM_ALL_MATCH}d.......(w[-x].*($str_STICK_PERM_PARAMETER_NAMES_REGEX)|.[sS])"
+
+	######################################################################
+	# Rule:      fSgid
+	# Search:    Search for any object that has the set-GID
+	#            bits ("s") set
+	# Criteria:  * must have the "set-GID" bit set
+	# Action:    Display directory listing with "fSgid" prefix
+	#
+	findopts_construct_parameter_segment -f -o "$str_FINDOPT_PERM_SGID" -t fSgid -r "${str_REGEX_BEFORE_PERM_ALL_MATCH}$str_REGEX_FOR_PERM_SGID"
+
+	######################################################################
+	# Rule:      fSuid
+	# Search:    Search for any object that has the set-UID or the set-GID
+	#            bits ("s") set, inclusively.
+	# Criteria:  * must either have the "set-UID" or "set-GID" bits set
+	# Action:    Display directory listing with "fSuid" prefix
+	#
+	findopts_construct_parameter_segment -f -o "$str_FINDOPT_PERM_SUID" -t fSuid -r "${str_REGEX_BEFORE_PERM_ALL_MATCH}$str_REGEX_FOR_PERM_SUID"
+
+	######################################################################
+	# Rule:      fUnevenfile
+	# Search:    Search for any object that has uneven permissions
+	#            assigned.
+	# Criteria:  * must have the group-exec permission set AND NOT owner-exec OR
+	#            * must have the group-write permission set AND NOT owner-write OR
+	#            * must have the group-read permission set AND NOT owner-read OR
+	#            * must have the world-exec permission set AND NOT owner-exec OR
+	#            * must have the world-write permission set AND NOT owner-write OR
+	#            * must have the world-read permission set AND NOT owner-read OR
+	#            * must have the world-exec permission set AND NOT group-exec OR
+	#            * must have the world-write permission set AND NOT group-write OR
+	#            * must have the world-read permission set AND NOT group-read OR
+	#
+	# Action:    Display file listing with "fUnevenfile" prefix
+	#
+	#Removed previous implementation of skipping files having uid having 21 and gid 20 and world writeable bit set
+	#No previous rule in any of the check-list is using uneven tag, hence removal of above check is fine.
+	#This change is implementation is to fix QM001808542 defect.
+	str_UNEVEN_PERM_OTHER_PARAMETER="
+		-a ( ( ! $str_FINDOPT_PERM_OX ( $str_FINDOPT_PERM_GX -o $str_FINDOPT_PERM_WX ) )
+		-o ( ! $str_FINDOPT_PERM_OW ( $str_FINDOPT_PERM_GW -o $str_FINDOPT_PERM_WW ) )
+		-o ( ! $str_FINDOPT_PERM_OR ( $str_FINDOPT_PERM_GR -o $str_FINDOPT_PERM_WR ) )
+	        -o ( ! $str_FINDOPT_PERM_GX $str_FINDOPT_PERM_WX )
+	        -o ( ! $str_FINDOPT_PERM_GW $str_FINDOPT_PERM_WW )
+		-o ( ! $str_FINDOPT_PERM_GR $str_FINDOPT_PERM_WR ) )"
+	str_UNEVEN_PERM_OTHER_PARAMETER_REGEX="${str_REGEX_BEFORE_PERM_ALL_MATCH}(...[-S]..([xs]...|...[xt])|..-..(w...|...w).|.-..(r...|...r)..|......[-S]..[xt]|.....-..w.|....-..r..)"
+
+	findopts_construct_parameter_segment -f -o "$str_UNEVEN_PERM_OTHER_PARAMETER" -t fUnevenfile -r "$str_UNEVEN_PERM_OTHER_PARAMETER_REGEX"
+
+	find $str_SEARCH_PATH_TO_BE_USED $str_FINDOPT_FOR_ROOT_SEARCH 1>"${str_FIND_FILES_CACHE_PATH}.1" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+	str_FINDOPT_FOR_ROOT_SEARCH="$str_FINDOPT_PRUNE_EXPRESSION"
+	
+	######################################################################
+	# Rule:      fBrowser
+	# Search:    Search for the location of the netscape program, if there.
+	# Criteria:  must be executable and be over 2MB in size and be named netscape,
+	#            or netscape.bin.
+	# Action:    Display file path listing with "fBrowser" prefix
+	#findopts_construct_parameter_segment -d -n '.mozilla .netscape' -t fBrowser
+
+	######################################################################
+	# Rule:      fOpenSSL
+	# Search:    Search for the location of the openssl program, if there.
+	# Criteria:  must be executable and be named openssl
+	# Action:    Display file path listing with "fOpenSSL" prefix
+	#
+	#findopts_construct_parameter_segment_for_single_executable openssl
+
+	######################################################################
+	# Rule:      fJava
+	# Search:    Search for the location of the java program, if there.
+	# Criteria:  must be executable and be named java
+	# Action:    Display file path listing with "fJava" prefix
+	#
+	#findopts_construct_parameter_segment_for_single_executable java
+
+	######################################################################
+	# Rule: file_world_writable_dir
+	# Search:    Search for any directory objects that have the sticky-bit
+	#            ("t") assigned.
+	# Criteria:  * must be a directory
+	#            * have the world-write permission AND the "sticky" bit not set
+	# Action:    Display directory listing
+	#
+	findopts_construct_parameter_segment -d -t fWwdir -o "$str_FINDOPT_PERM_WW ! $str_FINDOPT_PERM_STICKY" -r "${str_REGEX_BEFORE_PERM_ALL_MATCH}d.......w[-x]"
+
+	######################################################################
+	# Rule: file_world_writable_dir_with_sticky_bit
+	# Search:    Search for any directory objects that have the sticky-bit
+	#            ("t") assigned.
+	# Criteria:  * must be a directory
+	#            * have the world-write permission AND the "sticky" bit set
+	# Action:    Display directory listing
+	#
+	findopts_construct_parameter_segment -d -t fUnAuthWwdir -o "$str_FINDOPT_PERM_WW" -o "$str_FINDOPT_PERM_STICKY" -r "${str_REGEX_BEFORE_PERM_ALL_MATCH}d.......w[tT]"
+
+	######################################################################
+	# Rule: unauth_world_readable_file
+	# Search:    Search for world readable files
+	#
+	#findopts_construct_parameter_segment -f -t fUnAuthWrfile -o "$str_FINDOPT_PERM_WR" -r "${str_REGEX_BEFORE_PERM_ALL_MATCH}$str_REGEX_FOR_FILES_PERM_WR"
+
+	######################################################################
+	# Rule: unauth_world_writable_file
+	# Search:    Search for world writable files
+	#
+	findopts_construct_parameter_segment -f -t fUnAuthWwfile -o "$str_FINDOPT_PERM_WW" -r "${str_REGEX_BEFORE_PERM_ALL_MATCH}$str_REGEX_FOR_FILES_PERM_WW"
+
+	######################################################################
+	# Rule: unauth_world_executable_file
+	# Search:    Search for world executable files
+	#
+	#findopts_construct_parameter_segment -f -t fUnAuthWxfile -o "$str_FINDOPT_PERM_WX" -r "${str_REGEX_BEFORE_PERM_ALL_MATCH}$str_REGEX_FOR_FILES_PERM_WX"
+
+	######################################################################
+	# Rule: unauth_group_writable_file
+	# Search:    Search for world executable files
+	#
+	#findopts_construct_parameter_segment -f -t fUnAuthGwfile -o '-perm -0020' -r "${str_REGEX_BEFORE_PERM_ALL_MATCH}$str_REGEX_FOR_PERM_GW"
+
+	######################################################################
+	# Rule:      fUnownedUserfile
+	# Search:    Search for any object that has an owner whose UID is not
+	#            registered in /etc/passwd.
+	# Criteria:  * must have no valid owner
+	# Action:    Display file listing with "fUnownedUser" prefix
+	#
+	# This case will be handled specially. There can't be any egrep regex match for nouser or nogroup.
+	# We will simply write such files into fUnownedUser file directly.
+
+	findopts_construct_parameter_segment -f -t fUnownedUserfile -o '-nouser' -r "${str_REGEX_BEFORE_PERM_ALL_MATCH}-......... [0-9]+ [0-9]+ "
+
+	######################################################################
+	# Rule:      fUnownedUserdir
+	# Search:    Search for any object that has an owner whose UID is not
+	#            registered in /etc/passwd.
+	# Criteria:  * must have no valid owner
+	# Action:    Display directory listing with "fUnownedUser" prefix
+	#
+	# This case will be handled specially. There can't be any egrep regex match for nouser or nogroup.
+	# We will simply write such files into fUnownedUser file directly.
+
+	findopts_construct_parameter_segment -d -t fUnownedUserdir -o '-nouser' -r "${str_REGEX_BEFORE_PERM_ALL_MATCH}d......... [0-9]+ [0-9]+ "
+	
+	######################################################################
+	# Rule:      fUnownedGroupdir
+	# Search:    Search for any object that has a group-owner whose GID
+	#            is not registered in /etc/group.
+	# Criteria:  * must have no valid group
+	# Action:    Display file/directory listing with "fUnownedGroup" prefix
+	#
+	# This case will be handled specially. There can't be any egrep regex match for nouser or nogroup.
+	# We will simply write such files into fUnownedGroup file directly.	
+	findopts_construct_parameter_segment -d -t fUnownedGroupfile -o '-nogroup' -r "${str_REGEX_BEFORE_PERM_ALL_MATCH}-......... [0-9]+ [^ ]+ [0-9]+ "
+
+	######################################################################
+	# Rule:      fUnownedGroupfile
+	# Search:    Search for any object that has a group-owner whose GID
+	#            is not registered in /etc/group.
+	# Criteria:  * must have no valid group
+	# Action:    Display file/directory listing with "fUnownedGroup" prefix
+	#
+	# This case will be handled specially. There can't be any egrep regex match for nouser or nogroup.
+	# We will simply write such files into fUnownedGroup file directly.	
+	findopts_construct_parameter_segment -f -t fUnownedGroupdir -o '-nogroup' -r "${str_REGEX_BEFORE_PERM_ALL_MATCH}d......... [0-9]+ [^ ]+ [0-9]+ "
+
+	######################################################################
+	# Rule:      fXauthority
+	# Search:    Search for .Xauthority files in the file system.
+	# Criteria:  Exact file name must match.
+	# Action:    Display all .Xauthority files.
+	[ -n "$str_PERM_FOR_XAUTH" ] || str_PERM_FOR_XAUTH="$str_REGEX_FOR_PERM_0600"
+	findopts_construct_parameter_segment -f -n ".Xauthority .xauth*" -t fXauthority
+	findopts_construct_parameter_segment -f -n ".Xauthority .xauth*" -r "$str_PERM_FOR_XAUTH" -t fXauthorityPerm 
+	
+	######################################################################
+	# Rule:      fUnAuthWwDevice
+	# Search:    Search for world writable Device nodes (character & block)
+	findopts_construct_parameter_segment -c -b $str_PIPE -t fUnAuthWwDevice -o "$str_FINDOPT_PERM_WW" -r "${str_REGEX_BEFORE_PERM_ALL_MATCH}$str_REGEX_FOR_DEVICES_WW"
+
+	find $str_SEARCH_PATH_TO_BE_USED $str_FINDOPT_FOR_ROOT_SEARCH 1>"${str_FIND_FILES_CACHE_PATH}.2" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+}
+
+search_for_system_library_files()
+{
+	######################################################################
+	# Rule:      disa-ver1-rel2-GEN001310 disa-GEN001300
+	# Search:    All the system library files
+	# Criteria:  All the system library files
+	# Criteria:  Check System log Files greater than 640 permissions
+	# Criteria:  Check System log Files Owner as root
+	# Criteria:  Check System log Files Group as root
+	# Action:    Display file path listing
+	#######################################################################
+
+	if [ -n "$str_CONF_LIBDIRS" ]
+	then
+		str_LIBDIRS="$str_CONF_LIBDIRS"
+	else	
+		str_LIBDIRS="/usr/lib /lib /usr/4lib /usr/share/lib /usr/platform/i86pc/lib /usr/openwin /usr/xpg4/lib /usr/sfw/lib /usr/dt/lib /usr/dt/appconfig /usr/perl5 /usr/j2se /usr/snadm/lib /usr/java1.2/jre/lib /usr/iplanet /usr/apache /var/sadm/smc/lib /etc/lib"
+	fi
+	[ -n "$str_LIB_USERS" ] || str_LIB_USERS="-user root"	
+	[ -n "$str_LIB_GROUPS" ] || str_LIB_GROUPS="-group root"
+	str_LIBNAMES=`findopts_get_ored_names '*.a' 'llib*' '*.so' '*.so.*' '*.sl' '*.sl.*'`
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fLibFiles"
+
+	$str_FIND_COMMAND $str_LIBDIRS $str_FINDOPT_PRUNE_EXPRESSION -o '(' $str_FIND_FOLLOW_OPTION -type f -print ')' >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+	
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fLibFilePerm"
+
+	$str_FIND_COMMAND $str_LIBDIRS $str_FINDOPT_PRUNE_EXPRESSION -o '(' $str_FIND_FOLLOW_OPTION -type f $str_LIBNAMES -a '(' $str_FINDOPT_PERM_GW -o $str_FINDOPT_PERM_WW -o $str_FINDOPT_PERM_SUID -o $str_FINDOPT_PERM_SGID -o $str_FINDOPT_PERM_STICKY ')' -print ')' >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fLibFileOwner"
+	$str_FIND_COMMAND $str_LIBDIRS $str_FINDOPT_PRUNE_EXPRESSION -o '(' $str_FIND_FOLLOW_OPTION '(' -type f -o -type d ')' ! '(' $str_LIB_USERS ')' -print ')' >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fLibFileGroup"
+	$str_FIND_COMMAND $str_LIBDIRS $str_FINDOPT_PRUNE_EXPRESSION -o '(' $str_FIND_FOLLOW_OPTION '(' -type f -o -type d ')' ! '(' $str_LIB_GROUPS ')' -print ')' >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+}
+
+search_for_system_log_files()
+{
+	######################################################################
+	# Search:    Get list of System log Files and disa-GEN001260
+	# Criteria:  Follow symbolic links
+	# Criteria:  Check System log Files greater than 640 permissions
+	# Action:    Display file path listing
+	#######################################################################
+	[ -n "$str_LOGDIRs" ] || str_LOGDIRs="/var/log /var/log/syslog /var/adm"
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fSyslogFileList"
+
+	$str_FIND_COMMAND $str_LOGDIRs $str_FIND_FOLLOW_OPTION $str_FINDOPT_PRUNE_EXPRESSION -o '(' -type f -print ')' >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+	
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fSyslogperm"
+	$str_FIND_COMMAND $str_LOGDIRs $str_FIND_FOLLOW_OPTION $str_FINDOPT_PRUNE_EXPRESSION -o '(' -name wtmp -prune ')' -o '(' -type f '(' $str_FINDOPT_PERM_OX -o $str_FINDOPT_PERM_GW -o $str_FINDOPT_PERM_GX -o $str_FINDOPT_PERM_WR -o $str_FINDOPT_PERM_WW -o $str_FINDOPT_PERM_WX -o $str_FINDOPT_PERM_SUID -o $str_FINDOPT_PERM_SGID -o $str_FINDOPT_PERM_STICKY ')' -print ')' >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+}
+
+
+search_for_more_permissive_man_pages()
+{
+	######################################################################
+	# Rule:      disa-GEN001280
+	# Search:    Manual page file permission more permissive than 644
+	# Criteria:  Manual page file permission more permissive than 644
+	# Action:    Display file path listing
+	#######################################################################
+	# Separate find required for Manual page as it searches in different directories
+	# It applies to disa-GEN001280.
+	#######################################################################
+	[ -n "$str_MANDIRS" ] || str_MANDIRS="/usr/man /usr/share/man /usr/dt/man /usr/dt/share/man /usr/j2se/man /usr/java1.2/man /usr/local/man /usr/local/ssl/man /usr/local/ssh/man /usr/local/share/man /usr/openwin/man /usr/openwin/share/man /usr/sfw/man /usr/sfw/share/man /usr/SUNWale/man /usr/SUNWale/share/man /usr/apache/man /usr/perl5/man /usr/perl5/5.6.1/man /usr/perl5/5.00503/man /usr/lbin/man /usr/contrib/man /usr/demo/link_audit/man /usr/demon/SOUND/man /var/cache/man /usr/X11R6/man /usr/X/man /usr/share/pvm3/man /usr/local/apache2/man /opt/upgrade/share/man /usr/contrib/man /usr/local/lib/perl5/5.*/man /opt/pd/share/man /usr/share/man/info /usr/share/info /usr/share/infopage"
+
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fManPagePerm"
+
+	$str_FIND_COMMAND $str_MANDIRS $str_FINDOPT_PRUNE_EXPRESSION -o '(' $str_FIND_FOLLOW_OPTION -type f '!' -name makewhatis '(' $str_FINDOPT_PERM_OX -o $str_FINDOPT_PERM_GW -o $str_FINDOPT_PERM_GX -o $str_FINDOPT_PERM_WW -o $str_FINDOPT_PERM_WX -o $str_FINDOPT_PERM_SUID -o $str_FINDOPT_PERM_SGID -o $str_FINDOPT_PERM_STICKY ')' -print ')' >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+	
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fManPageExtACL-temp"
+	$str_FIND_COMMAND $str_MANDIRS  $str_SOLARIS_ACL '(' $str_FINDOPT_PRUNE_EXPRESSION -o '(' $str_FIND_FOLLOW_OPTION -type f '!' -name makewhatis -print ')' ')'  >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+}
+
+search_for_rc_files()
+{
+	str_SEARCH_DIRECTORIES=''
+	case "$OS" in
+		$OS_TYPE_AIX)
+			str_SEARCH_DIRECTORIES='/etc/rc*'
+			;;
+		$OS_TYPE_LINUX)
+			str_SEARCH_DIRECTORIES='/etc/rc* /etc/init.d'
+			;;
+		$OS_TYPE_HPUX)
+			str_SEARCH_DIRECTORIES='/sbin/init.d /sbin/rc* /etc/rc.config.d /etc/rc*'
+			;;
+		$OS_TYPE_SUNOS)
+				str_SEARCH_DIRECTORIES="/sbin/rc* /etc/init.d /etc/rc*"
+				if [ -n "$str_SEARCH_DIRECTORIES_RUN_CTRL" ]
+				then
+					str_SEARCH_DIRECTORIES="$str_SEARCH_DIRECTORIES_RUN_CTRL"
+				fi
+			;;
+	esac
+	
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fRcScriptFiles"
+	$str_FIND_COMMAND $str_SEARCH_DIRECTORIES $str_FINDOPT_PRUNE_EXPRESSION -o '(' $str_FIND_FOLLOW_OPTION -type f -print ')' >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+
+	[ -n "$str_PERM_FOR_RCSCRIPT" ] || str_PERM_FOR_RCSCRIPT="$str_FINDOPT_PERM_0755"
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fRcScriptFilesPerm"
+	$str_FIND_COMMAND $str_SEARCH_DIRECTORIES $str_FINDOPT_PRUNE_EXPRESSION -o '(' $str_FIND_FOLLOW_OPTION $str_PERM_FOR_RCSCRIPT '(' -type f -print ')' ')' >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+
+	[ -n "$str_OWNER_FOR_RCSCRIPT" ] || str_OWNER_FOR_RCSCRIPT="root bin"
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fRcScriptFilesOwner"
+	str_IDS=`get_anded_user_group_ids -u "$str_OWNER_FOR_RCSCRIPT"`
+	$str_FIND_COMMAND $str_SEARCH_DIRECTORIES $str_FINDOPT_PRUNE_EXPRESSION -o '(' $str_FIND_FOLLOW_OPTION '(' -type f ')' $str_IDS -print ')' >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+        
+	[ -n "$str_GROUP_FOR_RCSCRIPT" ] || str_GROUP_FOR_RCSCRIPT="root bin sys system"
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fRcScriptFilesGroup"
+	str_IDS=`get_anded_user_group_ids -g "$str_GROUP_FOR_RCSCRIPT"`
+	$str_FIND_COMMAND $str_SEARCH_DIRECTORIES $str_FINDOPT_PRUNE_EXPRESSION -o '(' $str_FIND_FOLLOW_OPTION '(' -type f ')' $str_IDS -print ')' >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+}
+
+# For DISA rule GEN001200, GEN001220, GEN001240
+# For DISA RHEL6 rules V-38469, V-38472, V-38699
+search_for_more_permissive_system_commands()
+{
+
+	if [ -n "$str_CONF_SYSTEM_EXECUTABLE_SEARCH_DIRECTORIES" ]
+	then
+		str_SEARCH_DIRECTORIES="$str_CONF_SYSTEM_EXECUTABLE_SEARCH_DIRECTORIES"
+	else	
+		str_SEARCH_DIRECTORIES='/etc /bin /usr/bin /usr/lbin /usr/usb /sbin /usr/sbin'
+	fi
+	
+	[ -n "$str_FILE_SYSTEM_SCAN_DIRECTORIE" ] || str_FILE_SYSTEM_SCAN_DIRECTORIE="$str_SEARCH_DIRECTORIES"
+	
+	[ -n "$i_MAX_SYS_UID" ] || i_MAX_SYS_UID="499"
+	[ -n "$i_MAX_SYS_GID" ] || i_MAX_SYS_GID="499"
+	
+	if [ -n "$i_CONF_UID" ] && [ -n "$i_CONF_GID" ]
+	then
+		i_UID="$i_CONF_UID"
+		i_GID="$i_CONF_GID"
+	else
+		i_UID="$i_MAX_SYS_UID"
+		i_GID="$i_MAX_SYS_GID"
+	fi
+	if [ "$OS" = "$OS_TYPE_AIX" ]
+	then
+		AIX_PRUNE='( -name .current -prune ) -o'
+	fi
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fSysFPDFilesOwner"
+	$str_FIND_COMMAND $str_SEARCH_DIRECTORIES $str_FIND_FOLLOW_OPTION $AIX_PRUNE $str_FINDOPT_PRUNE_EXPRESSION -o '(' -type f ')' $str_FINDOPT_UID +$i_UID -print >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+ 
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fSysFPDDirOwner"
+	$str_FIND_COMMAND $str_SEARCH_DIRECTORIES $str_FIND_FOLLOW_OPTION $AIX_PRUNE $str_FINDOPT_PRUNE_EXPRESSION -o '(' $str_FIND_FOLLOW_OPTION '(' -type d ')' $str_FINDOPT_UID +$i_UID -print ')' >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+       
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fSysFPDFilesGroup"
+	$str_FIND_COMMAND $str_SEARCH_DIRECTORIES $str_FIND_FOLLOW_OPTION $AIX_PRUNE $str_FINDOPT_PRUNE_EXPRESSION -o '(' $str_FIND_FOLLOW_OPTION '(' -type f ')' $str_FINDOPT_GID +$i_GID -print ')' >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+	
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fSysFPDDirGroup"
+	$str_FIND_COMMAND $str_SEARCH_DIRECTORIES $str_FIND_FOLLOW_OPTION $AIX_PRUNE $str_FINDOPT_PRUNE_EXPRESSION -o '(' $str_FIND_FOLLOW_OPTION '(' -type d ')' $str_FINDOPT_GID +$i_GID -print ')' >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fSysCMDPerm"
+	$str_FIND_COMMAND $str_SEARCH_DIRECTORIES $str_FIND_FOLLOW_OPTION $AIX_PRUNE $str_FINDOPT_PRUNE_EXPRESSION -o '(' $str_FIND_FOLLOW_OPTION -type f -a '(' $str_FINDOPT_PERM_GW -o $str_FINDOPT_PERM_WW -o $str_FINDOPT_PERM_SUID -o $str_FINDOPT_PERM_SGID -o $str_FINDOPT_PERM_STICKY ')' -print ')' >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+	
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fSysCMDAcl-temp"
+	$str_FIND_COMMAND $str_SEARCH_DIRECTORIES $str_FIND_FOLLOW_OPTION $AIX_PRUNE $str_FINDOPT_PRUNE_EXPRESSION -o '(' $str_FIND_FOLLOW_OPTION -type f -print ')' >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fWwdirNonSysOwned"
+	find $str_FILE_SYSTEM_SCAN_DIRECTORIE $str_OTHER_FILESYSTEM_DESCEND_DIR $str_FIND_FOLLOW_OPTION $AIX_PRUNE $str_FINDOPT_TYPE_D $str_FINDOPT_PERM_WW $str_FINDOPT_UID +$i_MAX_SYS_UID -print  >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+
+	str_AUDIT_EXEC=`findopts_get_ored_names auditctl auditd ausearch aureport autrace audispd`
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fAuditTools"
+	
+	$str_FIND_COMMAND $str_SEARCH_DIRECTORIES $AIX_PRUNE $str_FIND_FOLLOW_OPTION '(' -type f ')' $str_AUDIT_EXEC >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+
+	[ -n "$str_PERM_FOR_AUDITTOOLS" ] || str_PERM_FOR_AUDITTOOLS="$str_FINDOPT_PERM_0750"	
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fAuditToolsPerm"
+	$str_FIND_COMMAND $str_SEARCH_DIRECTORIES $AIX_PRUNE $str_FIND_FOLLOW_OPTION '(' -type f ')' $str_AUDIT_EXEC $str_PERM_FOR_AUDITTOOLS  >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+
+	[ -n "$str_OWNER_FOR_AUDITTOOLS" ] || str_OWNER_FOR_AUDITTOOLS="root"
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fAuditToolsOwner"
+	str_IDS=`get_anded_user_group_ids -u "$str_OWNER_FOR_AUDITTOOLS"`
+	$str_FIND_COMMAND $str_SEARCH_DIRECTORIES $AIX_PRUNE $str_FIND_FOLLOW_OPTION '(' -type f ')' $str_AUDIT_EXEC $str_IDS -print >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+        
+	[ -n "$str_GROUP_FOR_AUDITTOOLS" ] || str_GROUP_FOR_AUDITTOOLS="root bin sys system"
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fAuditToolsGroup"
+	str_IDS=`get_anded_user_group_ids -g "$str_GROUP_FOR_AUDITTOOLS"`
+	$str_FIND_COMMAND $str_SEARCH_DIRECTORIES $AIX_PRUNE $str_FIND_FOLLOW_OPTION '(' -type f ')' $str_AUDIT_EXEC $str_IDS -print >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+}
+
+# For DISA rule GEN001320, GEN001340, and GEN001360
+search_for_yp_nis_files()
+{
+	str_SEARCH_DIRECTORIES='/var/yp /var/nis'
+	case "$OS" in
+		$OS_TYPE_AIX) str_SEARCH_DIRECTORIES="$str_SEARCH_DIRECTORIES /usr/lib/netsvc/yp /usr/lib/nis" ;;
+		$OS_TYPE_SUNOS) str_SEARCH_DIRECTORIES="$str_SEARCH_DIRECTORIES /usr/lib/netsvc/yp" ;;
+	esac
+
+	[ -n "$str_OWNER_FOR_NISNISPLUSYP" ] || str_OWNER_FOR_NISNISPLUSYP="root bin sys"
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fNisNisPlusYpOwner"
+	str_IDS=`get_anded_user_group_ids -u "$str_OWNER_FOR_NISNISPLUSYP"`
+	$str_FIND_COMMAND $str_SEARCH_DIRECTORIES $str_FINDOPT_PRUNE_EXPRESSION -o '(' $str_FIND_FOLLOW_OPTION -type f $str_IDS -print ')' >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+
+	[ -n "$str_GROUP_FOR_NISNISPLUSYP" ] || str_GROUP_FOR_NISNISPLUSYP="root bin sys"
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fNisNisPlusYpGroup"
+	str_IDS=`get_anded_user_group_ids -g "$str_GROUP_FOR_NISNISPLUSYP"`
+	$str_FIND_COMMAND $str_SEARCH_DIRECTORIES $str_FINDOPT_PRUNE_EXPRESSION -o '(' $str_FIND_FOLLOW_OPTION -type f $str_IDS -print ')' >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+
+	[ -n "$str_PERM_FOR_NISNISPLUSYP" ] || str_PERM_FOR_NISNISPLUSYP="$str_FINDOPT_PERM_0755"
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fNisNisPlusYpFilePerm"
+	$str_FIND_COMMAND $str_SEARCH_DIRECTORIES $str_FINDOPT_PRUNE_EXPRESSION -o '(' $str_FIND_FOLLOW_OPTION -type f $str_PERM_FOR_NISNISPLUSYP -print ')' >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+	
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fNisNisPlusYpFileList"
+	$str_FIND_COMMAND $str_SEARCH_DIRECTORIES $str_FINDOPT_PRUNE_EXPRESSION -o '(' $str_FIND_FOLLOW_OPTION -type f -print ')' >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+}
+
+# For DISA rule V-1048, V-1049, V-1061, V-22367
+# fSndDevices list all the character devices present in /dev/audio and /dev/snd
+search_for_audio_device_files ()
+{
+	str_SEARCH_DIRECTORIES='/dev/audio /dev/snd'
+
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fSndDevices"
+	$str_FIND_COMMAND $str_SEARCH_DIRECTORIES $str_FINDOPT_PRUNE_EXPRESSION -o '(' $str_FIND_FOLLOW_OPTION -type c -print ')' >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+	
+	[ -n "$str_OWNER_FOR_SNDDEVICES" ] || str_OWNER_FOR_SNDDEVICES="root"
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fSndDevicesOwner"
+	str_IDS=`get_anded_user_group_ids -u "$str_OWNER_FOR_SNDDEVICES"`
+	$str_FIND_COMMAND $str_SEARCH_DIRECTORIES $str_FINDOPT_PRUNE_EXPRESSION -o '(' $str_FIND_FOLLOW_OPTION $str_IDS -type c -print ')' >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+
+	[ -n "$str_GROUP_FOR_SNDDEVICES" ] || str_GROUP_FOR_SNDDEVICES="root bin sys system audio"
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fSndDevicesGroup"
+	str_IDS=`get_anded_user_group_ids -g "$str_GROUP_FOR_SNDDEVICES"`
+	$str_FIND_COMMAND $str_SEARCH_DIRECTORIES $str_FINDOPT_PRUNE_EXPRESSION -o '(' $str_FIND_FOLLOW_OPTION $str_IDS -type c -print ')' >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+
+	[ -n "$str_PERM_FOR_SNDDEVICES" ] || str_PERM_FOR_SNDDEVICES="$str_FINDOPT_PERM_0660"
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fSndDevicesPerm"
+	$str_FIND_COMMAND $str_SEARCH_DIRECTORIES $str_FINDOPT_PRUNE_EXPRESSION -o '(' $str_FIND_FOLLOW_OPTION $str_PERM_FOR_SNDDEVICES -type c -print ')' >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+}
+
+# fCronScripts lists all cron scripts mentioned below
+search_for_cron_scripts ()
+{
+	str_SEARCH_DIRECTORIES='/etc/cron.d /etc/crontab /etc/cron.daily /etc/cron.hourly /etc/cron.monthly /etc/cron.weekly /var/spool/cron'
+
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fCronScripts"
+	$str_FIND_COMMAND $str_SEARCH_DIRECTORIES $str_FINDOPT_PRUNE_EXPRESSION -o '(' $str_FIND_FOLLOW_OPTION -type f -print ')' >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+	
+	[ -n "$str_OWNER_FOR_CRONSCRIPTS" ] || str_OWNER_FOR_CRONSCRIPTS="root"
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fCronScriptsOwner"
+	str_IDS=`get_anded_user_group_ids -u "$str_OWNER_FOR_CRONSCRIPTS"`
+	$str_FIND_COMMAND $str_SEARCH_DIRECTORIES $str_FINDOPT_PRUNE_EXPRESSION -o '(' $str_FIND_FOLLOW_OPTION $str_IDS -type f -print ')' >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+
+	[ -n "$str_GROUP_FOR_CRONSCRIPTS" ] || str_GROUP_FOR_CRONSCRIPTS="root bin sys"	
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fCronScriptsGroup"
+	str_IDS=`get_anded_user_group_ids -g "$str_GROUP_FOR_CRONSCRIPTS"`
+	$str_FIND_COMMAND $str_SEARCH_DIRECTORIES $str_FINDOPT_PRUNE_EXPRESSION -o '(' $str_FIND_FOLLOW_OPTION $str_IDS -type f -print ')' >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+	
+	[ -n "$str_PERM_FOR_CRONSCRIPTS" ] || str_PERM_FOR_CRONSCRIPTS="$str_FINDOPT_PERM_0700"
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fCronScriptsPerm"
+	$str_FIND_COMMAND $str_SEARCH_DIRECTORIES $str_FINDOPT_PRUNE_EXPRESSION -o '(' $str_FIND_FOLLOW_OPTION $str_PERM_FOR_CRONSCRIPTS -type f -print ')' >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+}
+
+# fExtAttr lists all hidden extended file attributes using -xattr (for V-12032 - DISA Solaris 10 X86 rule)
+search_for_extended_file_attributes ()
+{
+	# Applicable only for Solaris
+	if [ "$OS" != "$OS_TYPE_SUNOS" ]
+	then
+		return
+	fi
+	
+	# Extended file attributes are searched from the path specified for str_XATTR_SEARCH_DIR in EO-SOLARIS10X86_findFiles_conf
+	# If str_XATTR_SEARCH_DIR is null, then its searched from /tmp by default
+	
+	[ -n "$str_XATTR_SEARCH_DIR" ] && str_SEARCH_DIRECTORIES="$str_XATTR_SEARCH_DIR" || str_SEARCH_DIRECTORIES='/tmp'
+
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fExtAttr"
+	find $str_SEARCH_DIRECTORIES $str_FINDOPT_PRUNE_EXPRESSION -o '(' -type f -xattr -print ')' >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+}
+
+# fSkeleton lists all /etc/skel files
+search_for_skel_scripts ()
+{
+	str_SEARCH_DIRECTORIES='/etc/skel'
+
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fSkeleton"
+	$str_FIND_COMMAND $str_SEARCH_DIRECTORIES $str_FINDOPT_PRUNE_EXPRESSION -o '(' $str_FIND_FOLLOW_OPTION -type f -print ')' >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+	
+	[ -n "$str_PERM_FOR_SKEL" ] || str_PERM_FOR_SKEL="$str_FINDOPT_PERM_0644"
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fSkeletonPerm"
+	$str_FIND_COMMAND $str_SEARCH_DIRECTORIES $str_FINDOPT_PRUNE_EXPRESSION -o '(' $str_FIND_FOLLOW_OPTION $str_PERM_FOR_SKEL -type f -print ')' >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+	
+	str_SEARCH_DIRECTORIES='/etc/bashrc /etc/csh.cshrc /etc/csh.login /etc/csh.logout /etc/environment /etc/ksh.kshrc /etc/profile /etc/suid_profile /etc/profile.d'
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fGlobalInitFiles"
+	$str_FIND_COMMAND $str_SEARCH_DIRECTORIES $str_FINDOPT_PRUNE_EXPRESSION -o '(' $str_FIND_FOLLOW_OPTION -type f -print ')' >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fGlobalInitFilesOwner"
+	str_IDS=`get_anded_user_group_ids -u "root bin sys"`
+	$str_FIND_COMMAND $str_SEARCH_DIRECTORIES $str_FINDOPT_PRUNE_EXPRESSION -o '(' $str_FIND_FOLLOW_OPTION $str_IDS -type f -print ')' >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+	
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fGlobalInitFilesGroup"
+	str_IDS=`get_anded_user_group_ids -g "root bin sys"`
+	$str_FIND_COMMAND $str_SEARCH_DIRECTORIES $str_FINDOPT_PRUNE_EXPRESSION -o '(' $str_FIND_FOLLOW_OPTION $str_IDS -type f -print ')' >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+	
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fGlobalInitFilesPerm"
+	$str_FIND_COMMAND $str_SEARCH_DIRECTORIES $str_FINDOPT_PRUNE_EXPRESSION -o '(' $str_FIND_FOLLOW_OPTION $str_FINDOPT_PERM_0644 -type f -print ')' >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"
+}
+
+exclude_users_in_passwd_format ()
+{
+	if [ -z "$str_USERS_TO_BE_EXCLUDED" ]
+	then
+		tee
+	else
+		str_REGEX_FOR_EXCLUDING_USERS=`echo "$str_USERS_TO_BE_EXCLUDED" | sed -e 's/,/|/g' -e 's/^/^(/' -e 's/$/):/'`
+		egrep -v "$str_REGEX_FOR_EXCLUDING_USERS"
+	fi
+}
+
+# It provides the following tags:
+# Corresponding to rules V-914 (fV914), V-915 (fV915), V-22351 (fV22351), V-904 (fV904-HomeFilesDirsOwn-$str_USER)
+# V-22361 (fV22361-HomeFilesDirsOwn-$str_USER), fLocalInitFiles (Local Initialization files)
+search_home_files_And_dir_for_user_and_group_ownership()
+{
+	#If required we need to implement this for Other platforms
+
+	str_LOCAL_FILES=".bashrc .bash_login .bash_logout .bash_profile .cshrc .dtprofile .dispatch .emacs .env .exrc .kshrc .login .logout .profile .tcshrc .dt"
+	str_LOCAL_INI_FILES=`echo "$str_LOCAL_FILES" | sed -e 's/ / -o -name /g' -e 's/^/( -name /' -e 's/$/ )/'`
+	str_NON_LOCAL_INI_FILES=`echo "$str_LOCAL_FILES" | sed -e 's/ / -a ! -name /g' -e 's/^/( ! -name /' -e 's/$/ )/'`
+	
+	str_TEMP_PASSWD_FILE="$str_STAGING_DIRECTORY/TMP_passwd_users"
+	$str_GETENT_PASSWD | exclude_users_in_passwd_format | egrep -v "/usr/bin/false|/bin/false|/dev/null|/sbin/nologin|/bin/nologin|/usr/bin/nologin|:$" >"$str_TEMP_PASSWD_FILE"
+	for str_TAG_FILE in "$str_STAGING_DIRECTORY"/fV904-HomeFilesDirsOwn-* "$str_STAGING_DIRECTORY"/fV22361-HomeFilesDirsOwn-*
+	do
+		rm -f "$str_TAG_FILE" 2>>"$str_FIND_ERRORS_PATH"
+	done
+	while read str_CURRENT_PASSWD_ENTRY
+	do
+		str_USER=`echo "$str_CURRENT_PASSWD_ENTRY" | cut -d: -f1 2>>"$str_FIND_ERRORS_PATH"`
+		if [ -z "$str_USER" ]
+		then
+			echo "Error: Empty user name" >>"$str_FIND_ERRORS_PATH"
+			continue
+		fi
+		
+		str_HOME_DIR=`echo "$str_CURRENT_PASSWD_ENTRY" | cut -d: -f6 2>>"$str_FIND_ERRORS_PATH"`
+		if [ -z "$str_HOME_DIR" -o ! -d "$str_HOME_DIR" ]
+		then
+			echo "Error: No home directory set or empty home directory for user $str_USER: $str_HOME_DIR" >>"$str_FIND_ERRORS_PATH"
+			continue
+		fi
+		if [ "$str_HOME_DIR" = "/" ]
+        then
+			echo "Error: Home directory set  to / for user $str_USER: $str_HOME_DIR" >>"$str_FIND_ERRORS_PATH"
+            continue
+		fi
+
+		
+		i_GID=`echo "$str_CURRENT_PASSWD_ENTRY" | cut -d: -f4 2>>"$str_FIND_ERRORS_PATH"`
+		if [ -z "$i_GID" ]
+		then
+			echo "Error: No GID value set for user: $str_USER" >>"$str_FIND_ERRORS_PATH"
+			continue
+		fi
+		
+		i_GIDS=`id -G "$str_USER" 2>>"$str_FIND_ERRORS_PATH"`
+		i_UIDS=`id -u "$str_USER" 2>>"$str_FIND_ERRORS_PATH"`
+
+		if [ -z "$i_GID" ]
+		then
+			echo "Error: id command didn't return data for user: $str_USER" >>"$str_FIND_ERRORS_PATH"
+			continue
+		fi
+		
+
+		str_FIND_GIDS=`echo "$i_GIDS" | sed -e "s/ / -a ! $str_FINDOPT_GID /g"`
+		str_FIND_GIDS="( ! $str_FINDOPT_GID $str_FIND_GIDS )"
+
+		str_fV904_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fV904-HomeFilesDirsOwn-$str_USER"
+		str_fV22361_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fV22361-HomeFilesDirsOwn-$str_USER"
+		str_LIF_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fLIF-Temp-$str_USER"
+		[ -n "$str_PERM_FOR_LIF" ] || str_PERM_FOR_LIF="$str_FINDOPT_PERM_0740"
+		str_LIFPERM_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fLIFPERM-Temp-$str_USER"
+		str_V914_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fV914-Temp-$str_USER"
+		str_V915_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fV915-Temp-$str_USER"
+		str_V22351_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fV22351-Temp-$str_USER"
+		
+		rm -f "$str_LIF_TAG_FILE_PATH" "$str_LIFPERM_TAG_FILE_PATH" "$str_V914_TAG_FILE_PATH" "$str_V915_TAG_FILE_PATH"
+		case "$OS" in
+			$OS_TYPE_LINUX)
+				str_PRINT_TO_FILE="-fprint"
+				find "$str_HOME_DIR" $str_FINDOPT_PRUNE_EXPRESSION -o \( \
+				\( $str_LOCAL_INI_FILES \! $str_FINDOPT_UID "$i_UIDS" $str_PRINT_TO_FILE  "$str_fV904_TAG_FILE_PATH" \) , \
+				\( $str_LOCAL_INI_FILES \( \! $str_FINDOPT_GID 0 -a \! $str_FINDOPT_GID "$i_GID" \) $str_PRINT_TO_FILE  "$str_fV22361_TAG_FILE_PATH" \) , \
+				\( $str_LOCAL_INI_FILES $str_PRINT_TO_FILE "$str_LIF_TAG_FILE_PATH" \) , \
+				\( $str_LOCAL_INI_FILES $str_PERM_FOR_LIF $str_PRINT_TO_FILE "$str_LIFPERM_TAG_FILE_PATH" \) , \
+				\( $str_NON_LOCAL_INI_FILES \! $str_FINDOPT_UID "$i_UIDS" $str_PRINT_TO_FILE  "$str_V914_TAG_FILE_PATH" \) , \
+				\( $str_NON_LOCAL_INI_FILES \( $str_FINDOPT_PERM_WX -o $str_FINDOPT_PERM_WW -o $str_FINDOPT_PERM_WR -o $str_FINDOPT_PERM_GW -o $str_FINDOPT_PERM_SGID -o $str_FINDOPT_PERM_SUID \) $str_PRINT_TO_FILE  "$str_V915_TAG_FILE_PATH" \) , \
+				\( $str_FIND_GIDS $str_PRINT_TO_FILE  "$str_V22351_TAG_FILE_PATH" \) \
+				\) &
+				append_pid_into_list_of_background_processes "$!"
+				;;
+			$OS_TYPE_SUNOS | $OS_TYPE_HPUX | $OS_TYPE_AIX )
+				find "$str_HOME_DIR" $str_FINDOPT_PRUNE_EXPRESSION -o \( $str_LOCAL_INI_FILES \! $str_FINDOPT_UID "$str_USER" \) >>"$str_fV904_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+				append_pid_into_list_of_background_processes "$!"
+				find "$str_HOME_DIR" $str_FINDOPT_PRUNE_EXPRESSION -o \( $str_LOCAL_INI_FILES \( \! $str_FINDOPT_GID 0 -a \! $str_FINDOPT_GID "$i_GID" \) \) >>"$str_fV22361_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+				append_pid_into_list_of_background_processes "$!"
+				find "$str_HOME_DIR" $str_FINDOPT_PRUNE_EXPRESSION -o \( $str_LOCAL_INI_FILES \) >>"$str_LIF_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+				append_pid_into_list_of_background_processes "$!"
+				find "$str_HOME_DIR" $str_FINDOPT_PRUNE_EXPRESSION -o \( $str_LOCAL_INI_FILES \)  $str_FINDOPT_PERM_0740 >>"$str_LIFPERM_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+				append_pid_into_list_of_background_processes "$!"
+				find "$str_HOME_DIR" $str_FINDOPT_PRUNE_EXPRESSION -o \( $str_NON_LOCAL_INI_FILES \! $str_FINDOPT_UID "$str_USER" \) >>"$str_V914_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+				append_pid_into_list_of_background_processes "$!"
+				find "$str_HOME_DIR" $str_FINDOPT_PRUNE_EXPRESSION -o \( $str_NON_LOCAL_INI_FILES \( $str_FINDOPT_PERM_WX -o $str_FINDOPT_PERM_WW -o $str_FINDOPT_PERM_WR -o $str_FINDOPT_PERM_GW -o $str_FINDOPT_PERM_SGID -o $str_FINDOPT_PERM_SUID \) \) >>"$str_V915_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+				append_pid_into_list_of_background_processes "$!"
+				find "$str_HOME_DIR" $str_FINDOPT_PRUNE_EXPRESSION -o \( $str_FIND_GIDS \) >>"$str_V22351_TAG_FILE_PATH"  2>>"$str_FIND_ERRORS_PATH" &
+				append_pid_into_list_of_background_processes "$!"
+				;;
+		esac
+	done < "$str_TEMP_PASSWD_FILE"
+}
+
+search_for_fUnAuthWwdir_user_group_dir()
+{
+	str_UNAUTHWWDIR_filelist=`cat "$str_STAGING_DIRECTORY/fUnAuthWwdir"`
+	
+	[ -n "$str_OWNER_FOR_UNAUTHWWDIR" ] || str_OWNER_FOR_UNAUTHWWDIR="root"
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fUnAuthWwdirOwner"
+	str_IDS=`get_anded_user_group_ids -u "$str_OWNER_FOR_UNAUTHWWDIR"`
+	$str_FIND_COMMAND $str_UNAUTHWWDIR_filelist -prune $str_IDS -type d -print >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH"
+	
+	[ -n "$str_GROUP_FOR_UNAUTHWWDIR" ] || str_GROUP_FOR_UNAUTHWWDIR="root bin sys system"
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fUnAuthWwdirGroup"
+	str_IDS=`get_anded_user_group_ids -g "$str_GROUP_FOR_UNAUTHWWDIR"`
+	$str_FIND_COMMAND $str_UNAUTHWWDIR_filelist -prune $str_IDS -type d -print >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH"
+}
+	
+# For V-924
+# fUnAuthWwDeviceMerge list all world writeable devices character and block files in /Dev
+# All files from this tag will finally be merged into fUnAuthWwDevice
+search_for_world_writeable_device_files ()
+{
+	[ -n "$str_DEVICE_TYPES" ] || str_DEVICE_TYPES='-type c -o -type b'
+	str_SEARCH_DIRECTORIES="/dev"
+	
+	str_TAG_FILE_PATH="$str_STAGING_DIRECTORY/fUnAuthWwDeviceMerge"
+	
+	find $str_SEARCH_DIRECTORIES $str_FINDOPT_PRUNE_REMOTE_FS -o '(' -name .udev -prune ')' -o '(' '(' $str_DEVICE_TYPES ')' $str_FINDOPT_PERM_WW -print ')' >"$str_TAG_FILE_PATH" 2>>"$str_FIND_ERRORS_PATH" &
+	append_pid_into_list_of_background_processes "$!"	
+	register_for_merge fUnAuthWwDevice fUnAuthWwDeviceMerge
+}
+
+merge_one_tag_to_another ()
+{
+	str_SOURCE_TAG=`echo "$1" | cut -d':' -f 2`
+	str_TARGET_TAG=`echo "$1" | cut -d':' -f 1`
+	str_SOURCE_TAG_PATH="$str_STAGING_DIRECTORY/$str_SOURCE_TAG"
+	str_TARGET_TAG_PATH="$str_STAGING_DIRECTORY/$str_TARGET_TAG"
+	
+	if [ ! -f "$str_SOURCE_TAG_PATH" ]
+	then
+		return
+	fi
+	
+	cat "$str_SOURCE_TAG_PATH" >> "$str_TARGET_TAG_PATH"
+	rm -f "$str_SOURCE_TAG_PATH"
+}
+
+search_for_non_absolute_paths_from_tags ()
+{
+	case "$OS" in
+		$OS_TYPE_LINUX | $OS_TYPE_SUNOS)	
+			get_non_absolute_list fRcScriptFiles LD_LIBRARY_PATH
+			get_non_absolute_list fRcScriptFiles LD_PRELOAD
+			get_non_absolute_list fRcScriptFiles PATH
+			;;
+		 $OS_TYPE_HPUX)
+			get_non_absolute_list fRcScriptFiles LD_LIBRARY_PATH
+			get_non_absolute_list fRcScriptFiles LD_PRELOAD
+			get_non_absolute_list fRcScriptFiles SHLIB_PATH
+			get_non_absolute_list fRcScriptFiles PATH
+			;;
+		 $OS_TYPE_AIX)
+			get_non_absolute_list fRcScriptFiles PATH
+			get_non_absolute_list fRcScriptFiles LIBPATH
+			get_non_absolute_list fRcScriptFiles LDR_PRELOAD
+
+			get_non_absolute_list fLocalInitFiles LD_LIBRARY_PATH
+			get_non_absolute_list fLocalInitFiles LDR_PRELOAD
+			get_non_absolute_list fLocalInitFiles LIBPATH
+			get_non_absolute_list fLocalInitFiles PATH
+			;;
+	esac
+
+}
+
+get_non_absolute_list ()
+{
+    if [ $# -lt 2 ]
+    then
+        return 1
+    fi
+
+    str_FINDFILES_TAG="$1"
+	str_TAG_PATH="$str_STAGING_DIRECTORY/$str_FINDFILES_TAG"
+    str_PATH_VARIABLE_NAME="$2"
+	str_PATHVARIABLENAME=`echo $str_PATH_VARIABLE_NAME | sed -e 's/_//g'`
+	str_TAG_FILE_PATH="${str_STAGING_DIRECTORY}/${str_FINDFILES_TAG}${str_PATHVARIABLENAME}"
+	rm -rf $str_TAG_FILE_PATH
+	
+	for str_CURRENT_FILE in `cat "$str_TAG_PATH"`
+    do	
+		if [ -s "$str_CURRENT_FILE" ]
+		then
+			egrep "^[[:space:]]*(export)?[[:space:]]*$str_PATH_VARIABLE_NAME=" $str_CURRENT_FILE | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]][[:space:]]*/ /' -e 's/[[:space:]]*$//' -e 's/[[:space:]]*;[[:space:]]*export[[:space:]]*PATH[[:space:]]*$//' | $AWK -F "=" -v str_SEARCH_PATH_VAR="$str_PATH_VARIABLE_NAME" -v str_FILE_NAME="$str_CURRENT_FILE" '{ if (match($2,"\\./|[=:]+:|[\" ][^/\\}=+]|[=:]+[^/][^$][\"\\=+]|:[[:space:]]*$|=[[:alnum:]]|:[[:alnum:]]|\\$|:\\.|\\.:|=//|://|\\\\[[:alnum:]]")) {printf ("%s:%s\n", str_FILE_NAME, $0);} }' >> $str_TAG_FILE_PATH
+		fi
+    done
+}
+
+trap "handle_sigterm" $i_SIGTERM $i_SIGINT
+
+initialise
+parse_parameters "$@"
+if [ -f ./Configuration_findFiles ]
+then
+    if [ `egrep -c '^#<type>[[:space:]]+Sensor' ./Configuration_findFiles ` -eq 0 ]
+    then
+        . ./Configuration_findFiles
+        rm -f ./Configuration_findFiles
+    fi	
+fi	
+exit_if_we_need_not_update_cache_else_clear_old_cache
+
+
+create_and_execute_find_timeout_script
+process_directories_to_be_pruned
+process_scan_directories_if_any_or_use_root
+
+execute_find_for_root_or_scan_directories
+
+# Custom find command calls
+search_for_system_library_files
+search_for_system_log_files
+search_for_more_permissive_man_pages
+search_for_rc_files
+search_for_more_permissive_system_commands
+search_for_yp_nis_files
+search_for_audio_device_files
+search_for_cron_scripts
+search_for_skel_scripts
+search_home_files_And_dir_for_user_and_group_ownership
+search_for_world_writeable_device_files
+search_for_extended_file_attributes 
+
+wait_for_find_processes_to_exit_and_do_post_processing
+search_for_fUnAuthWwdir_user_group_dir
+search_for_non_absolute_paths_from_tags
+finalise
+exit 0
+
