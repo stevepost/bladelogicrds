@@ -1,0 +1,141 @@
+{
+  "name" : "EO-HPUX1123_findFiles_and_conf",
+  "scriptType" : "Copy and execute the script against each host separately (for non-NSH scripts)",
+  "allowRunWithNoTarget" : false,
+  "nshScriptParams" : [ {
+    "name" : "MAX_DISK_PERCENTAGE_FLAG",
+    "description" : "MAX_DISK_PERCENTAGE flag",
+    "index" : 1,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "defaultValue" : "-maxdiskpercentage",
+    "valueRequiredAtRuntime" : false,
+    "editable" : true
+  }, {
+    "name" : "MAX_DISK_PERCENTAGE_VALUE",
+    "description" : "prevents find files from using more than percentage",
+    "index" : 2,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "defaultValue" : "??TARGET.MAX_DISK_PERCENTAGE??",
+    "valueRequiredAtRuntime" : false,
+    "editable" : true
+  }, {
+    "name" : "EXCLUDED_DIR_FLAG",
+    "description" : "EXCLUDED_DIR flag",
+    "index" : 3,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "defaultValue" : "-prune",
+    "valueRequiredAtRuntime" : false,
+    "editable" : true
+  }, {
+    "name" : "EXCLUDED_DIR_VALUE",
+    "description" : "directory-path will not be searched as part of global seach",
+    "index" : 4,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "defaultValue" : "??TARGET.EXCLUDED_DIR??",
+    "valueRequiredAtRuntime" : false,
+    "editable" : true
+  }, {
+    "name" : "CACHE_HRS_FLAG",
+    "description" : "CACHE_HRS flag",
+    "index" : 5,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "defaultValue" : "-cachehours",
+    "valueRequiredAtRuntime" : false,
+    "editable" : true
+  }, {
+    "name" : "CACHE_HRS_VALUE",
+    "description" : " the number of hours for which find files will continue",
+    "index" : 6,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "defaultValue" : "??TARGET.CACHE_HRS??",
+    "valueRequiredAtRuntime" : false,
+    "editable" : true
+  }, {
+    "name" : "RSCD_DIRECTORY_FLAG",
+    "description" : "RSCD_DIRECTORY flag",
+    "index" : 7,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "defaultValue" : "-rscddirectory",
+    "valueRequiredAtRuntime" : false,
+    "editable" : true
+  }, {
+    "name" : "RSCD_DIRECTORY_VALUE",
+    "description" : "This will be excluded from global search for non compliant files",
+    "index" : 8,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "defaultValue" : "??TARGET.RSCD_DIR??",
+    "valueRequiredAtRuntime" : false,
+    "editable" : true
+  }, {
+    "name" : "SCAN_DIRECTORY_FLAG",
+    "description" : "SCAN_DIRECTORY flag",
+    "index" : 9,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "defaultValue" : "-scandirectory",
+    "valueRequiredAtRuntime" : false,
+    "editable" : true
+  }, {
+    "name" : "SCAN_DIRECTORY_VALUE",
+    "description" : "point for global search for non compliant files",
+    "index" : 10,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "defaultValue" : "/",
+    "valueRequiredAtRuntime" : false,
+    "editable" : true
+  }, {
+    "name" : "FIND_FILES_TIMEOUT_FLAG",
+    "description" : "FIND_FILES_TIMEOUT flag",
+    "index" : 11,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "defaultValue" : "-findtimeout",
+    "valueRequiredAtRuntime" : false,
+    "editable" : true
+  }, {
+    "name" : "FIND_FILES_TIMEOUT_VALUE",
+    "description" : "Time out in seconds value for find files",
+    "index" : 12,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "defaultValue" : "0",
+    "valueRequiredAtRuntime" : false,
+    "editable" : true
+  }, {
+    "name" : "EXCLUDE_HOME_DIR_USER_FLAG",
+    "description" : "EXCLUDE_HOME_DIR_USER FLAG",
+    "index" : 13,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "defaultValue" : "-excludeusers",
+    "valueRequiredAtRuntime" : false,
+    "editable" : true
+  }, {
+    "name" : "EXCLUDE_HOME_DIR_USER_LIST_VALUE",
+    "description" : "unix system user accounts where home should not be scanned.",
+    "index" : 14,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "defaultValue" : "??TARGET.DISA Properties.HPUX_EXCLUDE_HOME_DIR_USER_LIST??",
+    "valueRequiredAtRuntime" : false,
+    "editable" : true
+  }, {
+    "name" : "FORCEFIND_VALUE",
+    "description" : "forces updating of cache, regardless of time since last updation",
+    "index" : 15,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "defaultValue" : "-forcefind",
+    "valueRequiredAtRuntime" : false,
+    "editable" : true
+  } ]
+}
