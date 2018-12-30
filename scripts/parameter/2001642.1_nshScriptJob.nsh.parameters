@@ -1,0 +1,26 @@
+{
+  "name" : "ChefDeployScript",
+  "description" : "This script is used by Chef agent deploy job and Chef cookbook deploy job.Please DO NOT DELETE THIS.",
+  "scriptType" : "Execute the script once, passing the host list as a parameter to the script",
+  "allowRunWithNoTarget" : false,
+  "nshScriptParams" : [ {
+    "name" : "ChefVersion",
+    "description" : "Chef Version",
+    "index" : 1,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "defaultValue" : "10.0.4",
+    "valueRequiredAtRuntime" : true,
+    "editable" : true
+  }, {
+    "name" : "HostnameList",
+    "description" : "Hostname List",
+    "index" : 2,
+    "flag" : "h",
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "defaultValue" : "%h",
+    "valueRequiredAtRuntime" : true,
+    "editable" : false
+  } ]
+}
