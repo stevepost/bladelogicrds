@@ -1,0 +1,97 @@
+{
+  "name" : "PuppetPackagerScript",
+  "description" : "This script is used to create Puppet agent bundle and Puppet agent deploy job.Please DO NOT DELETE THIS.",
+  "scriptType" : "Execute the script once, passing the host list as a parameter to the script",
+  "allowRunWithNoTarget" : true,
+  "nshScriptParams" : [ {
+    "name" : "-n",
+    "description" : "OS Name",
+    "index" : 1,
+    "flag" : "n",
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "valueRequiredAtRuntime" : true,
+    "editable" : false
+  }, {
+    "name" : "-v",
+    "description" : "OS Version",
+    "index" : 2,
+    "flag" : "v",
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "valueRequiredAtRuntime" : true,
+    "editable" : false
+  }, {
+    "name" : "-a",
+    "description" : "OS Architecture",
+    "index" : 3,
+    "flag" : "a",
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "valueRequiredAtRuntime" : true,
+    "editable" : false
+  }, {
+    "name" : "-r",
+    "description" : "Ruby Installer",
+    "index" : 4,
+    "flag" : "r",
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "valueRequiredAtRuntime" : true,
+    "editable" : false
+  }, {
+    "name" : "-p",
+    "description" : "Puppet Version",
+    "index" : 5,
+    "flag" : "p",
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "valueRequiredAtRuntime" : true,
+    "editable" : false
+  }, {
+    "name" : "-i",
+    "description" : "Puppet Installer",
+    "index" : 6,
+    "flag" : "i",
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "valueRequiredAtRuntime" : true,
+    "editable" : false
+  }, {
+    "name" : "-f",
+    "description" : "Facter Installer",
+    "index" : 7,
+    "flag" : "f",
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "valueRequiredAtRuntime" : true,
+    "editable" : false
+  }, {
+    "name" : "-d",
+    "description" : "Dependencies",
+    "index" : 8,
+    "flag" : "d",
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "valueRequiredAtRuntime" : true,
+    "editable" : false
+  }, {
+    "name" : "-t",
+    "description" : "File Type Location",
+    "index" : 9,
+    "flag" : "t",
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "valueRequiredAtRuntime" : true,
+    "editable" : false
+  }, {
+    "name" : "Targets",
+    "description" : "Targets",
+    "index" : 10,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "defaultValue" : "%h",
+    "valueRequiredAtRuntime" : true,
+    "editable" : false
+  } ]
+}
