@@ -1,0 +1,702 @@
+#!/bin/sh
+#set -x 
+#<name> bmc-findFiles
+#<desc> Shared Script for Finding Files
+#<type> Sensor
+#<sci>  SOX PCI Unix Script - findFiles
+#<owner> Copyright (C) 2008 BladeLogic, Inc.
+#######################################################################
+#<doc> NAME
+#<doc>         findFiles
+#<doc>
+#<doc> SYNTAX
+#<doc>          bmc-findFiles <OS=osname> <FORCEFIND=<y/n>
+#<doc>		Ex. bmc-findFiles OS=Solaris FORCEFIND=n
+#<doc>
+#<doc> DESCRIPTION
+#<doc> findFiles
+#<doc> If Force Find = n, results from the last 24 hours will be used
+#<doc> 
+#<doc> 
+#######################################################################
+#  MODIFY DATE   MODIFIED BY   REASON FOR & DESCRIPTION OF MODIFICATION
+#  -----------  -------------  ----------------------------------------
+#  12-May-2009	Deepti Joshi	Initial Version
+#  19-Jun-2009	Deepti Joshi      changes for handling null command line arguments
+#  26-AUG-2009  Padmakar Jadhav   Removed the background monitoring and 
+#                                   created comma separated pid list for SunOS
+#  22-SEP-2009  Padmakar Jadhav   Removed maxdepth with find /* -prune for root directory 
+                
+#######################################################################
+### Setting language to US English ###
+LANG=`locale -a | egrep "^C$" | head -1`
+if [ -z "$LANG" ]; then
+        echo "Language C not found, Please install C encoding" >&2
+        exit 1
+else
+        LANG="$LANG_VALUE" ; export LANG
+	LC_ALL="$LANG_VALUE" ; export LC_ALL
+fi
+
+######################################################################
+#Get the required input
+#
+######################################################################
+
+STAGE_DIR=`pwd`
+iArgs=$#
+cnt=0
+if [ $iArgs -eq 0 ]; then
+	echo "----------------------------------------------------------------------------------" >> $STAGE_DIR/findFilesParms.txt
+	echo "bmc-findFiles [FORCEFIND="y/n"] [MAX_DISK_PERCENT=] [USER_DIRs=] [SCAN_FOLDER=]..." >> $STAGE_DIR/findFilesParms.txt
+        echo "no inupt parameters, hence following default values are considered" >> $STAGE_DIR/findFilesParms.txt
+        echo "<OS=$OS> [FORCEFIND=n] [MAX_DISK_PERCENT=80] [USER_DIRs=null] [SCAN_FOLDER=null]" >> $STAGE_DIR/findFilesParms.txt
+	echo "----------------------------------------------------------------------------------" >> $STAGE_DIR/findFilesParms.txt
+else
+	while [ $cnt -lt $iArgs ]
+	do
+	        param=`echo $1 | cut -d'=' -f1`
+	        val=`echo $1 | cut -d'=' -f2`
+	        
+	    if [ $param = "OS" ]; then
+	        	OS="$val"
+	    elif [ $param = "FORCEFIND" ]; then
+			FORCEFIND="$val"
+		elif [ $param = "MAX_DISK_PERCENTAGE" ]; then
+			MAX_DISK_PERCENT="$val"
+		elif [ $param = "USER_DIRs" ]; then
+			USER_DIRs="$val"
+		elif [ $param = "SCAN_FOLDER" ]; then
+			SCAN_FOLDER="$val"
+		elif [ $param = "CACHE_HRS" ]; then
+			CACHE_HRS="$val"
+        elif [ $param = "STAGE_DIR" ]; then
+                 if [ ! -z "$val" ];then
+                    STAGE_DIR="$val"
+                 fi
+		elif [ $param = "TARGET_RSCD_DIR" ]; then
+                 TARGET_RSCD_DIR="$val"
+        fi
+
+           cnt=`expr $cnt + 1 `
+           shift
+	done
+fi
+
+if [ -z "$OS" ]; then
+	OS=`uname`
+fi
+
+if [ -z "$FORCEFIND" ]; then
+	FORCEFIND="n"
+fi
+
+if [ -z "$MAX_DISK_PERCENT" ]; then
+	MAX_DISK_PERCENT=80
+fi
+
+if [ -z "$USER_DIRs" ]; then
+	USER_DIRs=""
+fi
+
+if [ -z "$SCAN_FOLDER" ]; then
+	SCAN_FOLDER="SCAN_FOLDER"
+fi
+
+if [ -z "$CACHE_HRS" ]; then
+	CACHE_HRS=24
+fi
+
+#Added RSCD directories to be excluded always.
+if [ ! -z "$TARGET_RSCD_DIR" ]; then
+   USER_DIRs="$TARGET_RSCD_DIR,$USER_DIRs"
+fi
+
+if [ $OS = "Solaris" ]; then
+	AWK=nawk
+else
+	AWK=awk
+fi
+export AWK
+#######################################################################
+# Initialize temporary files.
+#
+FindErrors=$STAGE_DIR/FindErrors.bmc
+SRRFIND=$STAGE_DIR/findFiles.bmc
+TIMESTAMP=`date +"%y%m%d%H%M%S"`
+PID=$$
+#######################################################################
+# First lets check if we even need to do this
+#
+
+if [ -f $SRRFIND ]
+then
+	if [ "$FORCEFIND" = "n" ]; then	
+            # Cache can be used. Find out weather it is stale or usable.
+		findTimeCreated=`ls -l $SRRFIND | tr -s ' ' | cut -d" " -f6,7,8`
+		findYrCreated=`ls -l $SRRFIND | tr -s ' ' | cut -d" " -f8 | $AWK '{if(! match($1,":")) print $1 }'`
+		
+		if [ -z "$findYrCreated" ]; then
+			
+			month=`echo $findTimeCreated | cut -d" " -f1`
+			day=`echo $findTimeCreated | cut -d" " -f2`
+			hr=`echo $findTimeCreated | cut -d" " -f3| cut -d":" -f1`
+			min=`echo $findTimeCreated | cut -d" " -f3| cut -d":" -f2`
+			
+			case  $month  in
+                		Jan)   monthNum=1;;
+                		Feb)   monthNum=2;;
+                		Mar)   monthNum=3;;
+                		Apr)   monthNum=4;;
+                		May)   monthNum=5;;
+                		Jun)   monthNum=6;;
+                		Jul)   monthNum=7;;
+                		Aug)   monthNum=8;;
+                		Sep)   monthNum=9;;
+                		Oct)   monthNum=10;;
+                		Nov)   monthNum=11;;
+                		Dec)   monthNum=12;;
+           		esac
+           		
+			minFromBeiningYear=`expr $min + $hr \* 60 + $day \* 1440 + $monthNum \* 43200`
+			
+			currTime=`date "+%m %d %H %M"`
+			currMonth=`echo $currTime| cut -d" " -f1`
+			currDay=`echo $currTime| cut -d" " -f2`
+			currHr=`echo $currTime| cut -d" " -f3`
+			currMin=`echo $currTime| cut -d" " -f4`
+			currMinFromBeiningYear=`expr $currMin + $currHr \* 60 + $currDay \* 1440 + $currMonth \* 43200`
+			
+			invalideSeconds=`expr $CACHE_HRS \* 60`
+			
+			resultCachedMinutes=`expr $currMinFromBeiningYear - $minFromBeiningYear`
+			if [ $monthNum -gt $currMonth -o \( $monthNum -eq $currMonth -a $day -gt $currDay \) \
+				-o \( $monthNum -eq $currMonth -a $day -eq $currDay -a $hr -gt $currHr \) ]
+			then
+				# This assumes there are 365 days in a year (365 * 24 * 60)
+				minutesInYear="525600"
+				resultCachedMinutes=`expr $resultCachedMinutes + $minutesInYear`
+			fi
+			
+			if [ $resultCachedMinutes -le $invalideSeconds ]; then
+				exit 0
+			else
+				rm -f $SRRFIND
+			fi
+		else
+			rm -f $SRRFIND
+		fi
+	else
+		rm -f $SRRFIND
+	fi
+fi
+
+######################################################################
+#
+# Clean-up temporary (working files)files left from the previous run....
+#
+#
+######################################################################
+rm -f ${FindErrors}
+
+#######################################################################
+# Create script that checks find processes running @ background
+# and take decisions accordingly
+# $1 = grppid
+# $2 = MAX_DISK_PERCENT
+# $3 = PID
+# $4 = SRRFIND
+# $5 = FindErrors
+#######################################################################
+LsProc="$STAGE_DIR/LsProc-${TIMESTAMP}${PID}"
+cat <<-! 1> ${LsProc}
+#!/bin/sh
+#set -x 
+grppid=\${1}
+MAX_DISK_PERCENT=\${2}
+PID=\${3}
+SRRFIND=\${4}
+FindErrors=\${5}
+
+###############################################################
+# Function :   sed_func()
+# Description: 
+# find out all the sym links from file and reads actual permissions of the 
+# file to which sym link points. Using sed concat the required tags in front 
+# of file list.
+#
+###############################################################
+sed_func()
+{
+
+cd $STAGE_DIR
+
+#combine all tmp files to one file.
+cat BLG-find.* > $STAGE_DIR/BLG-findTmp0
+	
+if [ -s "$STAGE_DIR/BLG-findTmp0" ]; then
+	sed -e "s/$/'/g" -e "s/^/'/g" $STAGE_DIR/BLG-findTmp0 > $STAGE_DIR/1.BLG-findTmp0
+	xargs ls -dblLn < $STAGE_DIR/1.BLG-findTmp0 > $STAGE_DIR/2.BLG-findTmp0
+	tr -s ' ' < $STAGE_DIR/2.BLG-findTmp0 > $STAGE_DIR/3.BLG-findTmp0
+	
+
+	#Separate out symbolic link entries from $STAGE_DIR/BLG-findTmp0
+	cat 3.BLG-findTmp0 | grep "^l" >> BLG-findTmp1
+
+	#Separate out non-symlink entries from $STAGE_DIR/BLG-findTmp0
+	cat 3.BLG-findTmp0 | grep -v "^l" >> BLG-findTmp2
+			
+	#Get the permissions on the file to which sym link points to.
+	if [ -s "$STAGE_DIR/BLG-findTmp1" ]; then
+		cat $STAGE_DIR/BLG-findTmp1 | $AWK '{ var="";  if(substr(\$1,1,1) == "l"){ \\
+			for(i=9; i<=NF; i++) { \\
+			if(i < NF) var=var sprintf("%s ",\$i); else var=var \$NF; } \\
+			print "\x27"var"\x27" }\\
+		}' | xargs ls -dblLn >> $STAGE_DIR/BLG-findTmp3
+	fi
+
+	if [ -s "$STAGE_DIR/BLG-findTmp3" ]; then
+		cat BLG-findTmp2 $STAGE_DIR/BLG-findTmp3 >> $STAGE_DIR/BLG-findTmp4
+	else
+		cat BLG-findTmp2 >> $STAGE_DIR/BLG-findTmp4
+	fi
+
+	# To get unowned files, search those uIds and gIds which are available in our file listing, 
+	# but are not available in /etc/passwd and /etc/group respectively.
+	# Then prepare the sed pattern to add fUnowned tag against all those entries which are unowned.
+
+	#Get the Uid and Gid of all file listing.
+	cat $STAGE_DIR/BLG-findTmp4 | $AWK '{print \$3 }' | sort -n | uniq  > $STAGE_DIR/uid.file
+	cat $STAGE_DIR/BLG-findTmp4 | $AWK '{print \$4 }' | sort -n | uniq  > $STAGE_DIR/gid.file
+
+	#Get uid and gid from passwd and group system files.
+	cat /etc/passwd | cut -d':' -f3 | sort -n > $STAGE_DIR/etc_passwd_uid
+	cat /etc/group | cut -d':' -f3 | sort -n > $STAGE_DIR/etc_group_gid
+
+	#Find the complement of Uid and Gid.
+	OSname=\`uname\`
+	if [ \$OSname = "SunOS" ]; then
+		#comm -23 $STAGE_DIR/uid.file $STAGE_DIR/etc_passwd_uid > $STAGE_DIR/uid_compl.file
+		#comm -23 $STAGE_DIR/gid.file $STAGE_DIR/etc_group_gid  > $STAGE_DIR/gid_compl.file
+		sort $STAGE_DIR/etc_passwd_uid $STAGE_DIR/etc_passwd_uid $STAGE_DIR/uid.file | uniq -u > $STAGE_DIR/uid_compl.file
+		sort $STAGE_DIR/etc_group_gid $STAGE_DIR/etc_group_gid $STAGE_DIR/gid.file | uniq -u > $STAGE_DIR/gid_compl.file
+	else
+		grep -vxF -f $STAGE_DIR/etc_passwd_uid $STAGE_DIR/uid.file > $STAGE_DIR/uid_compl.file
+		grep -vxF -f $STAGE_DIR/etc_group_gid $STAGE_DIR/gid.file > $STAGE_DIR/gid_compl.file
+	fi
+
+	#Prepare sed pattern to find out unowned files.
+	touch $STAGE_DIR/sed_pattern
+	for i in \`cat uid_compl.file | $AWK '{print \$1}' \`
+	do
+		echo "s/^\([a-z/-]* [0-9]* \$i .*\)/\1 fUnowned/" >> $STAGE_DIR/sed_pattern
+	done
+
+	for j in \`cat gid_compl.file | $AWK '{print \$1}' \`
+	do
+		echo "s/^\([a-z/-]* [0-9]* [0-9]* \$j .*\)/\1 fUnowned/" >> $STAGE_DIR/sed_pattern
+	done
+
+	#Run sed pattern against all the file entries to get list of unowned entries.	
+	if [ -s "$STAGE_DIR/sed_pattern" ] ; then
+		\`sed -f $STAGE_DIR/sed_pattern $STAGE_DIR/BLG-findTmp4 > $STAGE_DIR/BLG-findTmp5 \`
+	fi
+	
+	#Run sed command to get list of all entries like world writable file/dir, unauthorised files etc.
+	if [ -s "$STAGE_DIR/BLG-findTmp5" ] ; then
+		\`sed -e '/^d.......w[^T/^t]/ s/$/ fWwdir/' -e '/^-.......w[^t]/ s/$/ fUnAuthWwfile/' -e '/^-.....s/ s/$/ fUnAuthUidGid/' -e '/^-.....S/ s/$/ fUnAuthUidGid/' -e '/^-..s/ s/$/ fUnAuthUidGid/' -e '/^-..S/ s/$/ fUnAuthUidGid/' $STAGE_DIR/BLG-findTmp5 > $STAGE_DIR/BLG-findTmp6 \`
+	else
+		\`sed -e '/^d.......w[^T/^t]/ s/$/ fWwdir/' -e '/^-.......w[^t]/ s/$/ fUnAuthWwfile/' -e '/^-.....s/ s/$/ fUnAuthUidGid/' -e '/^-.....S/ s/$/ fUnAuthUidGid/' -e '/^-..s/ s/$/ fUnAuthUidGid/' -e '/^-..S/ s/$/ fUnAuthUidGid/' $STAGE_DIR/BLG-findTmp4 > $STAGE_DIR/BLG-findTmp6 \` 
+	fi
+
+fi
+
+#Attach fGWwdir tag to file entries searched in $PATH env. variable.
+	if [ -s "$STAGE_DIR/BLG.fGWwdir" ]; then
+		sed -e "s/$/'/g" -e "s/^/'/g" $STAGE_DIR/BLG.fGWwdir > $STAGE_DIR/1.BLG.fGWwdir
+		xargs ls -dblLn < $STAGE_DIR/1.BLG.fGWwdir > $STAGE_DIR/2.BLG.fGWwdir
+		tr -s ' ' < $STAGE_DIR/2.BLG.fGWwdir > $STAGE_DIR/3.BLG.fGWwdir
+		sed -e '/^d....w/ s/$/ fGWwdir/' -e '/^d.......w/ s/$/ fGWwdir/' $STAGE_DIR/3.BLG.fGWwdir > $STAGE_DIR/4.BLG.fGWwdir
+	fi
+
+}
+
+#Keep monitoring all the find commands run in background. Kill all the running find processes if PERCENTAGE_USED reaches max limit, else process the result.
+while [ \`ps -p "\${grppid}" | grep -v defunct | wc -l \` -ne 1 ]
+do
+                       PERCENT_USED=\`df -k $STAGE_DIR | sed -e '2,$!d' | grep "%" | cut -d"%" -f1 | $AWK '{ print \$NF }'\`
+                        if [ "\$PERCENT_USED" -ge "\${MAX_DISK_PERCENT}" ] ; then
+				break
+                	else
+                        	sleep 3
+                	fi
+done
+
+PERCENT_USED=\`df -k $STAGE_DIR | sed -e '2,$!d' | grep "%" | cut -d"%" -f1 | $AWK '{ print \$NF }'\`
+                        if [ "\$PERCENT_USED" -ge "\${MAX_DISK_PERCENT}" ] ; then
+		echo "Failed because the $STAGE_DIR space usage is greater than \${MAX_DISK_PERCENT} percent." >> \${FindErrors}
+		#kill all running processes
+	        pids=\`ps -ef | grep \${grppid} | grep -v grep | $AWK '{ print \$2 }'\`
+                for pid_kill in \${pids}
+                do
+              	        \`kill -9 \$pid_kill >/dev/null 2>&1\`
+	        done
+
+		\`rm -f $STAGE_DIR/*BLG* $STAGE_DIR/uid* $STAGE_DIR/gid* $STAGE_DIR/etc_* $STAGE_DIR/sed_pattern > /dev/null 2>&1 \`
+                touch ${SRRFIND}
+                #echo "MONITER: NOT ENOUGH DISK SPACE AVALIBLE" >> $SRRFIND
+				echo "Percent Used=$PERCENT_USED" >> ${SRRFIND}
+				echo "LOW_SPACE_ERROR: Can't run bmc-findFiles script because the $STAGE_DIR space usage is greater than $MAX_DISK_PERCENT percent." >> ${SRRFIND}
+				echo "Please free up disk space on '`hostname`' or increase the disk usage percentage for the 'TARGET.MAX_DISK_PERCENTAGE' property." >> ${SRRFIND}
+
+else
+
+		# Call sed function
+		sed_func
+
+ 		#echo "Catting Temporary directories to" \${SRRFIND}
+ 		if [ -s "$STAGE_DIR/4.BLG.fGWwdir" ]; then
+ 			cat $STAGE_DIR/4.BLG.fGWwdir > $STAGE_DIR/BLG-findTmp7 
+ 		fi
+ 		
+ 		if [ -s "$STAGE_DIR/BLG-findTmp6" ]; then
+			cat $STAGE_DIR/BLG-findTmp6  >> $STAGE_DIR/BLG-findTmp7 
+ 		fi
+        	
+
+		cat $STAGE_DIR/BLG-findTmp7 | egrep "fGWwdir|fUnowned|fWwdir|fUnAuthWwfile|fUnAuthUidGid" > $STAGE_DIR/BLG-findTmp8
+		mv $STAGE_DIR/BLG-findTmp8 \${SRRFIND}
+		
+		#
+		#DEBUG Statements
+		#echo "<info>Records generated by global find: \`grep -c . \${SRRFIND}\`</info>"
+		#echo "<info>Errors detected during global find: \`grep -c . \${FindErrors}\`</info>"
+		#
+
+		\`rm -f $STAGE_DIR/*BLG* $STAGE_DIR/uid* $STAGE_DIR/gid* $STAGE_DIR/etc_* $STAGE_DIR/sed_pattern > /dev/null 2>&1 \`
+                if [ ! -f ${SRRFIND} ];then
+                    touch ${SRRFIND}
+                    #echo "MONITER: NOT ENOUGH DISK SPACE AVALIBLE" >> $SRRFIND
+					echo "Percent Used=$PERCENT_USED" >> ${SRRFIND}
+					echo "LOW_SPACE_ERROR: Can't run bmc-findFiles script because the $STAGE_DIR space usage is greater than $MAX_DISK_PERCENT percent." >> ${SRRFIND}
+					echo "Please free up disk space on '`hostname`' or increase the disk usage percentage for the 'TARGET.MAX_DISK_PERCENTAGE' property." >> ${SRRFIND}
+                fi
+		#
+		#echo "</FINDFILES_INFO>"
+		#
+fi
+!
+
+#######################################################################
+# Protect the mini-scripts.
+#
+chown 0:0  ${LsProc} 2>/dev/null
+chmod 0777 ${LsProc} 2>/dev/null
+
+
+######################################################################
+# Rule:      fExclude
+# Search:    Don't look in the following directories.
+# Criteria:  must be specified by the user as a parameter.
+# Action:    Don't display the file
+#
+
+USER_DIRs=`echo $USER_DIRs | sed 's/,/ /g'`
+
+for USER_DIR in $USER_DIRs
+do
+  fTrim=`echo $USER_DIR | sed 's/^\///g' | sed 's/\/$//g'`
+  fTemp=`echo $fTrim | grep -v "/"`
+  if [ -z "$fTemp" ]
+  then
+    if [ -n "$fExclude" ]
+    then
+      fExclude="$fExclude -o"
+    fi
+    
+    if [ $OS = Linux -o $OS = HP-UX ]
+	then
+		fExclude="${fExclude} -path $USER_DIR -prune"
+    else
+		SEARCH_PATH=`echo $USER_DIR | sed 's/\// /g' | $AWK '{print $NF}'`
+  		fExclude="${fExclude} -name $SEARCH_PATH -prune"
+    fi
+  else
+    EXCLUDE_DIRs="${EXCLUDE_DIRs}${fTrim}\$|"
+  fi
+done
+
+if [ -n "$fExclude" ]
+then
+  fExclude="($fExclude )"
+fi
+
+# Automounts
+if [ $OS = Linux ]; then
+	AUTOMOUNTS=`ls /etc | grep "auto." | grep -v master | $AWK -F"." {'print $2'} | sort -u`
+else
+	AUTOMOUNTS=`ls /etc | grep "auto_" | grep -v master | $AWK -F"_" {'print $2'} | sort -u`
+fi
+for a in $AUTOMOUNTS; do
+# # checks if dir starts with an automounted path
+  EXCLUDE_DIRs="${EXCLUDE_DIRs}${a}\$|"
+done
+
+######################################################################
+# Rule:      file_group_world_writable
+# Search:    Search for the location of world writable directories
+# Criteria:  Must be world writable directory
+# Action:    Display file path listing
+
+fGWwdir='(
+( -type d )
+( -perm -0002 -o -perm -0020 ) 
+-print
+)'
+
+######################################################################
+# Rule:      unauth_suid_sgid_file
+# Search:    Search for any object that has the set-GID and/or set-UID
+#            bits ("s") set
+# Criteria:  * must have the "set-GID" and/or "set-UID" bit set
+# Action:    Display directory listing
+#
+fUnAuthUidGid='( 
+( -type f ) 
+( -perm -2000 -o -perm -4000 ) -print )'
+
+
+######################################################################
+# Rule: file_world_writable_dir
+# Search:    Search for any directory objects that have the sticky-bit
+#            ("t") assigned.
+# Criteria:  * must be a directory
+#            * have the world-write permission AND the "sticky" bit not set
+# Action:    Display directory listing 
+#
+fWwdir='( 
+( -type d ) 
+( -perm -0002 ! -perm -1000 ) 
+-print 
+)'
+
+
+######################################################################
+# Rule: unauth_world_writable_file
+# Search:    Search for any directory objects that have the sticky-bit
+#            ("t") assigned.
+# Criteria:  * must be a directory
+#            * have the world-write permission AND the "sticky" bit not set
+# Action:    Display directory listing with "fSticky" prefix
+#
+fUnAuthWwfile='( 
+( -type f ) 
+( -perm -0002 ! -perm -1000 ) 
+-print 
+)' 
+
+
+######################################################################
+# Rule:      fUnowned
+# Search:    Search for any object that has an owner whose UID is not
+#            registered in /etc/passwd.  Search for any object that
+#            has a group-owner whose GID is not registered in /etc/group.
+# Criteria:  * must either have no valid owner or no valid group
+# Action:    Display directory listing with "fUnowned" prefix
+#
+fUnowned='( 
+( -nouser -o -nogroup ) 
+-print 
+)'
+
+######################################################################
+# Execute the master "find" statment on all local hard
+# drives.  Network drives, CD-ROMs, and floppy disks are
+# excluded from this search.  All output is redirected to
+# the working file.
+#
+if [ "$DEGUG" = "true" ]
+then
+	echo "Started `date`."
+fi
+
+PERCENT_USED=`df -k $STAGE_DIR | sed -e '2,$!d' | grep "%" | cut -d"%" -f1 | $AWK '{ print $NF }'`
+if [ "$PERCENT_USED" -ge "$MAX_DISK_PERCENT" ]
+then
+    echo "Percent Used=$PERCENT_USED" >> ${FindErrors}
+    echo "Can't run script because the $STAGE_DIR space usage is greater than $MAX_DISK_PERCENT percent." >> ${FindErrors} 
+    rm -rf ${LsProc}
+    #echo "MONITER: NOT ENOUGH DISK SPACE AVALIBLE" >> $SRRFIND
+	echo "Percent Used=$PERCENT_USED" >> ${SRRFIND}
+	echo "LOW_SPACE_ERROR: Can't run bmc-findFiles script because the $STAGE_DIR space usage is greater than $MAX_DISK_PERCENT percent." >> ${SRRFIND}
+	echo "Please free up disk space on '`hostname`' or increase the disk usage percentage for the 'TARGET.MAX_DISK_PERCENTAGE' property." >> ${SRRFIND}
+    touch ${SRRFIND}  
+    exit 0
+fi
+
+grppid=""
+if [ $OS = Linux ]; then
+	EXCLUDE_DIRs="${EXCLUDE_DIRs}tcb\$|dev\$|proc\$|vol\$|xfn\$|cdrom\$|mnt\$"
+	LINUXVERSION=`cat /etc/redhat-release 2>/dev/null | grep -c 2.1`    
+	if [ $LINUXVERSION -ne 0 ]; then
+		DIRs=`ls -1ALl --full-time / 2>${FindErrors} | grep "^d" | egrep -v "$EXCLUDE_DIRs" | \
+	                                                            $AWK '{print "/"$11}'`
+	else
+		DIRs=`ls -1ALl --time-style=long-iso / 2>${FindErrors} | grep "^d" | egrep -v "$EXCLUDE_DIRs" | \
+                                                            $AWK '{print "/"$8}'`
+	fi
+elif [ $OS = AIX ]; then
+	EXCLUDE_DIRs="${EXCLUDE_DIRs}tcb$|dev$|proc$|vol$|xfn$|cdrom$|mnt$"
+	DIRs=`ls -1ALl / 2>${FindErrors} | grep "^d" | egrep -v "$EXCLUDE_DIRs" | $AWK '{print "/"$9}'`
+else
+	EXCLUDE_DIRs="${EXCLUDE_DIRs}tcb$|dev$|devices$|proc$|vol$|xfn$|cdrom$|mnt$|fd$"
+	DIRs=`ls -1ALl / 2>${FindErrors} | grep "^d" | egrep -v "$EXCLUDE_DIRs" | $AWK '{print "/"$9}'`
+fi
+
+
+    
+        if [ $OS = Linux -o $OS = HP-UX ]
+        then
+            fExclude="${fExclude} -path /dev -o -path /proc -o -path /tcb -o -path /vol -o -path /xfn -o -path /cdrom -o -path /mnt -prune"
+        elif [ $OS = Solaris -o $OS = AIX ]
+        then
+             fExclude="${fExclude} -name dev -o -name proc -o -name tcb -o -name vol -o -name xfn -o -name cdrom -o -name mnt -prune"
+        else
+            fExclude="${fExclude} -name /dev -o -name /proc -o -name /tcb -o -name /vol -o -name /xfn -o -name /cdrom -o -name /mnt -prune"
+        fi
+   
+
+	if [ "$SCAN_FOLDER" != "SCAN_FOLDER" ]
+	then
+		#Search on SCAN_FOLDER if provided...
+		for PATh in `echo $SCAN_FOLDER | sed 's/,/ /g'`
+		do
+    		    if [ -d "$PATh" ]
+		    then
+			dirname=`echo $PATh | cut -c 2-`
+			tmpfile=$STAGE_DIR/BLG-find.${dirname}.${PID}
+			touch $tmpfile
+			if [ $OS = Linux ]; then
+				find $PATh -xdev ${fExclude}  ${fUnAuthUidGid} -o ${fWwdir} -o ${fUnAuthWwfile} -o ${fUnowned} \
+				1> ${tmpfile} 2> ${FindErrors} &
+			elif [ $OS = AIX ]; then
+				find $PATh -xdev ${fExclude}  ${fUnAuthUidGid} -o ${fWwdir} -o ${fUnAuthWwfile} -o ${fUnowned} \
+				1> ${tmpfile} 2> ${FindErrors} &
+			else
+				find $PATh -xdev '(' ! -local -prune ')' -o '(' -local  ${fExclude}  ${fUnAuthUidGid} -o ${fWwdir} \
+				-o ${fUnAuthWwfile} -o ${fUnowned} ')'  1> ${tmpfile} 2> ${FindErrors} &
+			fi
+			
+			pid=`echo $!`
+			
+			if [ -z "$grppid" ]; then
+				grppid="${pid}"
+			else
+				grppid="${grppid} ${pid}"
+			fi
+		    fi
+		done
+	else
+		if [ -n "${fExclude}" ]
+		then
+			fExclude=`echo "${fExclude} -o"`
+		fi
+	
+		########################################################################
+		#Run find on '/' directory.
+		########################################################################
+
+#		if [ $OS = Linux ]; then
+#			find / -maxdepth 1 -xdev ${fExclude} ${fUnAuthUidGid} -o ${fWwdir} -o ${fUnAuthWwfile} -o ${fUnowned} \
+#			1> $STAGE_DIR/BLG-find.${PID} 2> ${FindErrors} &
+#		elif [ $OS = AIX ]; then
+#			find /* -prune -xdev ${fExclude}  ${fUnAuthUidGid} -o ${fWwdir} -o ${fUnAuthWwfile} -o ${fUnowned} \
+#			1> $STAGE_DIR/BLG-find.${PID} 2> ${FindErrors} &
+#		else
+#			find /* -prune \( -fstype ufs \) \( ! -local -prune \) -o \( -local \( ${fExclude}  ${fUnAuthUidGid} -o ${fWwdir} \
+#			-o ${fUnAuthWwfile} -o ${fUnowned} \) \) 1> $STAGE_DIR/BLG-find.${PID} 2> ${FindErrors} &
+#		fi
+                
+                pid=`echo $!`
+                if [ -z "$grppid" ]; then
+			grppid="${pid}"
+		else
+			grppid="${grppid} ${pid}"
+		fi
+
+		########################################################################
+
+		#Run Find command on rest all directories.
+		for dir in ${DIRs}
+		do	
+			dirname=`echo $dir | cut -c 2-`
+			tmpfile=$STAGE_DIR/BLG-find.${dirname}.${PID}
+			touch $tmpfile
+			if [ $OS = Linux ]; then
+				find  $dir -xdev ${fExclude}  ${fUnAuthUidGid} -o ${fWwdir} -o ${fUnAuthWwfile} -o ${fUnowned} \
+				1> ${tmpfile} 2> ${FindErrors} &
+			elif [ $OS = AIX ]; then
+				find $dir -xdev ${fExclude}  ${fUnAuthUidGid} -o ${fWwdir} -o ${fUnAuthWwfile} -o ${fUnowned} \
+				1> ${tmpfile} 2> ${FindErrors} &
+			else
+				find $dir -xdev \( ! -local -prune \) -o \( -local \( ${fExclude}  ${fUnAuthUidGid} -o ${fWwdir} \
+				-o ${fUnAuthWwfile} -o ${fUnowned} \) \) 1> ${tmpfile} 2> ${FindErrors} &
+			fi
+			pid=`echo $!`
+		if [ -z "$grppid" ]; then
+			grppid="${pid}"
+		else
+			grppid="${grppid} ${pid}"
+		fi
+				
+		done
+		#######################################################################
+		# Separate find required for file_group_world_writable EO as it 
+		# searches only in $PATH.
+		#######################################################################
+	
+		if [ $OS = AIX ]; then
+			path=`grep ^PATH=* /etc/environment | sed 's/PATH=//g' | tr ':' ' '`
+		elif [ $OS = HP-UX ]; then
+			export VUE="null"
+			. /etc/profile 1>/dev/null 2>/dev/null
+			path=`echo $PATH | tr ':' ' '`
+		else
+			. /etc/profile 1>/dev/null 2>/dev/null
+			path=`echo $PATH | tr ':' ' '`
+		fi
+		new_path=""
+		for dir in $path
+		do
+			if [ -d $dir ] && [ $dir != "." ] && [ $dir != ".." ]
+			then
+				new_path="$new_path $dir"
+			fi
+		done
+		path=$new_path
+	
+		if [ $OS = Linux ]; then
+			find $path ${fGWwdir} 1> $STAGE_DIR/BLG.fGWwdir 2> ${FindErrors} &
+		elif [ $OS = AIX ]; then
+			find $path ${fGWwdir} 1> $STAGE_DIR/BLG.fGWwdir 2> ${FindErrors} &
+		else
+			find $path \( ${fGWwdir} \) 1> $STAGE_DIR/BLG.fGWwdir 2> ${FindErrors} &
+		fi
+		
+		pid=`echo $!`
+		if [ -z "$grppid" ]; then
+			grppid="${pid}"
+		else
+			grppid="${grppid} ${pid}"
+		fi
+
+		#######################################################################
+
+	fi
+
+OSname=`uname`
+if [ $OSname = "SunOS" ]; then
+   comma_grppid=`echo \${grppid}|sed 's/ /,/g'`
+   grppid=${comma_grppid}
+fi
+$STAGE_DIR/LsProc-${TIMESTAMP}${PID} "${grppid}" "${MAX_DISK_PERCENT}" "${PID}" "${SRRFIND}" "${FindErrors}" 2>${FindErrors} 1>/dev/null

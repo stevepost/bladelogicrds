@@ -1,0 +1,78 @@
+{
+  "name" : "bmc-findFiles",
+  "scriptType" : "Copy and execute the script against each host separately (for non-NSH scripts)",
+  "allowRunWithNoTarget" : false,
+  "nshScriptParams" : [ {
+    "name" : "OS",
+    "description" : "os parameter",
+    "index" : 1,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "defaultValue" : "OS=??TARGET.OS??",
+    "valueRequiredAtRuntime" : false,
+    "editable" : true
+  }, {
+    "name" : "FORCEFIND",
+    "description" : "FORCEFIND parameter",
+    "index" : 2,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "defaultValue" : "FORCEFIND=n",
+    "valueRequiredAtRuntime" : false,
+    "editable" : true
+  }, {
+    "name" : "MAX_DISK_PERCENTAGE",
+    "description" : "MAX_DISK_PERCENTAGE parameter",
+    "index" : 3,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "defaultValue" : "MAX_DISK_PERCENTAGE=80",
+    "valueRequiredAtRuntime" : false,
+    "editable" : true
+  }, {
+    "name" : "USER_DIRs",
+    "description" : "USER_DIRS parameter",
+    "index" : 4,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "defaultValue" : "USER_DIRs=''",
+    "valueRequiredAtRuntime" : false,
+    "editable" : true
+  }, {
+    "name" : "SCAN_FOLDER",
+    "description" : "SCAN_FOLDER parameter",
+    "index" : 5,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "defaultValue" : "SCAN_FOLDER=SCAN_FOLDER",
+    "valueRequiredAtRuntime" : false,
+    "editable" : true
+  }, {
+    "name" : "CACHE_HRS",
+    "description" : "CACHE_HRS parameter",
+    "index" : 6,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "defaultValue" : "CACHE_HRS=24",
+    "valueRequiredAtRuntime" : false,
+    "editable" : true
+  }, {
+    "name" : "STAGE_DIR",
+    "description" : "Stage directory location parameter",
+    "index" : 7,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "defaultValue" : "STAGE_DIR=??TARGET.STAGING_DIR??",
+    "valueRequiredAtRuntime" : false,
+    "editable" : true
+  }, {
+    "name" : "TARGET_RSCD_DIR",
+    "description" : "CM Agent Installation Directory",
+    "index" : 8,
+    "parameterFlagRequired" : false,
+    "acceptValue" : true,
+    "defaultValue" : "TARGET_RSCD_DIR=??TARGET.RSCD_DIR??",
+    "valueRequiredAtRuntime" : false,
+    "editable" : true
+  } ]
+}
