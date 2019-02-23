@@ -1,0 +1,28 @@
+{
+  "name" : "CentOS Host File",
+  "path" : "/Workspace",
+  "service" : {
+    "allowedOperations" : [ "DISCOVER", "BROWSE", "SNAPSHOT", "AUDIT", "DEPLOY", "COMPLIANCE", "ALLOW_REMEDIATION", "ALLOW_AUTO_REMEDIATION" ],
+    "parts" : [ {
+      "name" : "/etc/hosts",
+      "allowedOperations" : [ "BROWSE", "SNAPSHOT", "AUDIT", "COMPLIANCE" ],
+      "type" : "Configuration File",
+      "recurseSubfolders" : true
+    } ]
+  },
+  "policy" : {
+    "ruleGroups" : [ {
+      "name" : "Default",
+      "rules" : [ {
+        "name" : "Check hosts file contents",
+        "ruleExpression" : "\n\"Configuration File:/etc/hosts\" exists  AND\n\"Configuration File Entry:/etc/hosts//192.168.0.70\".\"Value1 as String (All OS)\" equals \"bladelogicrds\"  AND\n\"Configuration File Entry:/etc/hosts//192.168.0.110\".\"Value1 as String (All OS)\" equals \"STEVE-ACER-V17\"  AND\n\"Configuration File Entry:/etc/hosts//192.168.0.116\".\"Value1 as String (All OS)\" equals \"gitlab\"  AND\n\"Configuration File Entry:/etc/hosts//192.168.0.23\".\"Value1 as String (All OS)\" equals \"cent-bl-001\"  AND\n\"Configuration File Entry:/etc/hosts//192.168.0.24\".\"Value1 as String (All OS)\" equals \"cent-bl-002\"  AND\n\"Configuration File Entry:/etc/hosts//192.168.0.25\".\"Value1 as String (All OS)\" equals \"cent-bl-003\"\n",
+        "commentOut" : false,
+        "remediation" : {
+          "repairOption" : "REMEDIATE",
+          "packagePath" : "/Workspace/CentOS Hosts File",
+          "autoRemediation" : true
+        }
+      } ]
+    } ]
+  }
+}
